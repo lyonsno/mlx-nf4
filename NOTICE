@@ -1,0 +1,12 @@
+mlx-nf4
+=======
+
+The package-local C++ and Metal implementation is derived from the
+MIT-licensed MLX extension and quantized-kernel interfaces. Apple copyright
+notices are preserved in the kernel sources, and the MLX MIT license terms are
+preserved in LICENSE.
+
+The NF4 implementation and extraction were authored by Noah Lyons in the MLX
+fork history beginning with commit eccb857825439dd8c24c5cc5d27e9489fc2f4eef.
+The package extraction keeps MLX itself as a runtime and build dependency; it
+does not redistribute MLX or claim built-in MLX NF4 support.

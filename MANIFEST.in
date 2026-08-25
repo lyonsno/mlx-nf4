@@ -1,0 +1,6 @@
+include CMakeLists.txt
+include LICENSE
+include NOTICE
+include README.md
+recursive-include csrc *.cpp *.h
+recursive-include metal *.h *.metal

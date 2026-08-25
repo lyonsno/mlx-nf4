@@ -1,79 +1,166 @@
 # mlx-nf4
 
-NF4 / NormalFloat4 quantization helpers and package-local Metal kernels for MLX.
+Package-local NF4 / NormalFloat4 quantization and native Metal matmul kernels
+for [MLX](https://github.com/ml-explore/mlx).
 
-This package is the extension-route continuation of the declined MLX core NF4 PR. It does not monkey-patch MLX and does not claim built-in `mx.quantized_matmul(..., mode="nf4")` support.
+`mlx-nf4` carries the NF4 work as an MLX custom extension: it does not patch the
+installed `mlx` package, and it does not claim that
+`mlx.core.quantized_matmul(..., mode="nf4")` exists. The fast path loads a C++
+binding, dynamic library, and compiled Metal library shipped inside this
+package. The explicit reference path dequantizes first and exists for correctness
+checks.
 
-Current slice:
+## Install
 
-- `mlx_nf4.quantize`
-- `mlx_nf4.dequantize`
-- `mlx_nf4.pack_uint8_to_uint32`
-- `mlx_nf4.quantized_matmul`
-- `mlx_nf4.reference_quantized_matmul`
-- `mlx_nf4.NF4Linear`
+The package builds from source on Apple silicon and requires Xcode command-line
+tools, Python 3.10 or newer, and MLX 0.31.2 or newer:
 
-`mlx_nf4.quantized_matmul` dispatches to a package-local C++/Metal extension. The explicit `reference_quantized_matmul` helper is the slow dequantize-then-matmul path for correctness tests.
+```sh
+git clone https://github.com/lyonsno/mlx-nf4.git
+cd mlx-nf4
+python -m pip install .
+```
 
-## Packed Weight Intake
+For an exact revision without a persistent checkout:
 
-The package-native layout stores eight NF4 indices per `uint32`. For loaders that receive byte-packed weights, use:
+```sh
+python -m pip install \
+  "git+https://github.com/lyonsno/mlx-nf4.git@<commit>"
+```
+
+The build produces `_ext`, `libmlx_nf4_native.dylib`, and
+`mlx_nf4.metallib` inside the installed `mlx_nf4` package. Editable installs
+are useful for development, but the compatibility receipts use newly built,
+non-editable wheels in fresh environments. See
+[`docs/compatibility.md`](docs/compatibility.md) for the exact command and the
+evidence contract.
+
+## Quantize and multiply
 
 ```python
+import mlx.core as mx
 import mlx_nf4 as nf4
 
-wq = nf4.pack_uint8_to_uint32(byte_weight, source_order="high_first")
-layer = nf4.NF4Linear.from_packed(wq, scales, bias=bias)
+weight = mx.random.normal((32, 64))
+x = mx.random.normal((3, 64))
+
+packed_weight, scales = nf4.quantize(weight, group_size=64)
+y = nf4.quantized_matmul(
+    x,
+    packed_weight,
+    scales,
+    transpose=True,
+    group_size=64,
+)
+mx.eval(y)
 ```
 
-`source_order="high_first"` handles the nibble order used by bitsandbytes NF4 tensors observed in the companion model smoke. `source_order="low_first"` is the package-native logical byte order.
-
-For the common bitsandbytes tensor boundary:
+For a correctness oracle, call the slower path by name:
 
 ```python
-layer = nf4.NF4Linear.from_bitsandbytes(byte_weight, scales, bias=bias)
+y_reference = nf4.reference_quantized_matmul(
+    x,
+    packed_weight,
+    scales,
+    transpose=True,
+    group_size=64,
+)
 ```
 
-`from_bitsandbytes` expects already reconstructed float32 absmax scales. It does not parse safetensors files or resolve bitsandbytes nested/double-quantized `quant_state`; loader code should reconstruct those tensors before calling into `mlx_nf4`.
+`quantized_matmul` fails if the native extension is absent. It never silently
+falls back to dequantize-then-matmul and therefore cannot turn missing native
+code into a false performance result.
 
-## Build
+## NF4Linear
+
+```python
+import mlx.nn as nn
+import mlx_nf4 as nf4
+
+linear = nn.Linear(64, 32)
+quantized = nf4.NF4Linear.from_linear(linear, group_size=64)
+y = quantized(x)
+```
+
+The module also accepts already packed tensors. Its native layout stores eight
+NF4 indices per `uint32`:
+
+```python
+layer = nf4.NF4Linear.from_packed(packed_weight, scales, bias=bias)
+```
+
+For byte-packed weights, `source_order` states the nibble order explicitly:
+
+```python
+packed_weight = nf4.pack_uint8_to_uint32(
+    byte_weight,
+    source_order="high_first",
+)
+layer = nf4.NF4Linear.from_packed(packed_weight, scales, bias=bias)
+```
+
+`NF4Linear.from_bitsandbytes(byte_weight, scales, bias=bias)` is the compact
+form of the high-nibble-first boundary observed in bitsandbytes NF4 tensors. It
+expects float32 absolute-maximum scales that have already been reconstructed.
+It does not parse safetensors or resolve nested/double-quantized `quant_state`.
+
+## Native scope in 0.1
+
+- two-dimensional activation, weight, and scale tensors
+- `transpose=True`
+- group sizes 32, 64, and 128
+- float32, float16, and bfloat16 activations
+- packed `uint32` weights and float32 absolute-maximum scales
+
+Batched quantized matmul, non-transposed weights, and gather quantized matmul
+are not implemented in this release surface.
+
+## Development and verification
 
 ```sh
 python -m pip install -e .
+python -m unittest discover -s tests -v
 ```
 
-For local development against an MLX source checkout:
+The release-grade clean install is stricter:
 
 ```sh
-PYTHONPATH=/path/to/mlx/python python setup.py build_ext --inplace
+python tools/install_smoke.py \
+  --source "$PWD" \
+  --expected-revision "$(git rev-parse HEAD)" \
+  --mlx-version 0.32.2 \
+  --report /absolute/path/to/mlx-nf4-install-smoke.json
 ```
 
-The build produces `_ext`, `libmlx_nf4_native.dylib`, and `mlx_nf4.metallib` inside the `mlx_nf4` package directory.
+That check builds a fresh wheel against the exact requested stock MLX version,
+installs it outside the checkout, exercises the native kernel against the
+reference path, runs the core tests, and records route, artifact, and numerical
+evidence in JSON. It fails loud on fallback imports, stale revisions, version
+substitution, missing binaries, blank output, or zero-test pseudo-success.
 
-## Current Native Scope
+## Performance context
 
-The first native port supports 2D NF4 qmm on Metal:
+An early extraction smoke on an M4 Max measured the following single-call
+latencies for `x=(128, 2048)`, packed `w=(2048, 256)`, group size 64, and 20
+timed iterations:
 
-- activation dtypes: `float32`, `float16`, `bfloat16`
-- group sizes: `32`, `64`, `128`
-- `transpose=True`
-- no batched qmm yet
-- no `gather_qmm`
+| Path | Median latency |
+| --- | ---: |
+| package-local native NF4 | 0.245 ms |
+| explicit dequantize then matmul | 0.514 ms |
+| original MLX-core NF4 patch | 0.228 ms |
 
-## Test Smoke
+Those numbers are provenance for the extraction decision, not a portable
+benchmark claim. Hardware, MLX revision, shapes, dtypes, and warm-up determine
+the result; run the same workload in the consuming environment before making a
+deployment decision.
 
-After installation:
+## Provenance and license
 
-```text
-python -m unittest discover -s tests -v
-Ran 14 tests
-OK
-```
-
-Bounded timing smoke for `x=(128, 2048)`, packed `w=(2048, 256)`, `group_size=64`, 20 iterations:
-
-```text
-mlx_nf4.quantized_matmul: 0.245 ms
-reference_dequantize_matmul: 0.514 ms
-core_mx.quantized_matmul_nf4: 0.228 ms
-```
+The implementation began as an MLX core patch and was extracted after the
+maintainers declined the additional core maintenance surface and identified
+custom extensions as the appropriate route. The package preserves the MIT
+license and Apple notices inherited from MLX while separately identifying the
+NF4 implementation and extraction authorship. See
+[`docs/provenance.md`](docs/provenance.md), [`NOTICE`](NOTICE), and
+[`LICENSE`](LICENSE).
