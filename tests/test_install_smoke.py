@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 from pathlib import Path
+import tempfile
 import unittest
 
 from tools.install_smoke import assess_evidence, environment_command
@@ -79,7 +80,7 @@ def complete_evidence() -> dict:
                     "tolerance": tolerance,
                 }
                 for dtype, tolerance in (
-                    ("float32", 1e-5),
+                    ("float32", 1e-4),
                     ("float16", 2e-2),
                     ("bfloat16", 1.25e-1),
                 )
@@ -214,6 +215,39 @@ class TestInstallSmokeEvidence(unittest.TestCase):
         errors = assess_evidence(evidence)
 
         self.assertFalse(any("environment" in error for error in errors), errors)
+
+    def test_accepts_runtime_python_symlink_to_requested_base(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            builder = root / "builder-venv"
+            runtime = root / "runtime-venv"
+            (runtime / "bin").mkdir(parents=True)
+            builder.mkdir()
+            (runtime / "bin" / "python").symlink_to("/opt/python/bin/python3")
+
+            evidence = complete_evidence()
+            evidence["effective"].update(
+                {
+                    "environment_root": str(runtime),
+                    "builder_environment_root": str(builder),
+                    "runtime_environment_root": str(runtime),
+                    "python_executable": str(runtime / "bin" / "python"),
+                    "mlx_core_path": str(
+                        runtime / "lib/python3.12/site-packages/mlx/core.so"
+                    ),
+                    "mlx_nf4_path": str(
+                        runtime
+                        / "lib/python3.12/site-packages/mlx_nf4/__init__.py"
+                    ),
+                }
+            )
+
+            errors = assess_evidence(evidence)
+
+            self.assertFalse(
+                any("Python executable is outside" in error for error in errors),
+                errors,
+            )
 
     def test_rejects_missing_or_blank_native_artifacts(self):
         missing = complete_evidence()

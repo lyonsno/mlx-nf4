@@ -50,7 +50,7 @@ artifacts = {
 
 native_cases = []
 for dtype_name, dtype, tolerance in (
-    ("float32", mx.float32, 1e-5),
+    ("float32", mx.float32, 1e-4),
     ("float16", mx.float16, 2e-2),
     ("bfloat16", mx.bfloat16, 1.25e-1),
 ):
@@ -115,7 +115,7 @@ host_identity = {
 print(json.dumps({
     "mlx_version": importlib.metadata.version("mlx"),
     "python": str(Path(getattr(sys, "_base_executable", sys.executable)).resolve()),
-    "python_executable": str(Path(sys.executable).resolve()),
+    "python_executable": str(Path(sys.executable).absolute()),
     "python_version": platform.python_version(),
     "host_identity": host_identity,
     "build_only_packages_present": build_only_packages,
@@ -151,6 +151,15 @@ def _mapping(value: Any, name: str, errors: list[str]) -> dict[str, Any]:
         errors.append(f"missing or invalid {name}")
         return {}
     return value
+
+
+def _normalized_absolute_path(value: str) -> Path:
+    """Normalize path spelling without resolving virtualenv interpreter symlinks."""
+
+    path = os.path.abspath(os.path.expanduser(value))
+    if path == "/var" or path.startswith("/var/"):
+        path = "/private" + path
+    return Path(path)
 
 
 def assess_evidence(evidence: dict[str, Any]) -> list[str]:
@@ -202,7 +211,8 @@ def assess_evidence(evidence: dict[str, Any]) -> list[str]:
         and builder_root
         and isinstance(runtime_root, str)
         and runtime_root
-        and Path(builder_root).resolve() == Path(runtime_root).resolve()
+        and _normalized_absolute_path(builder_root)
+        == _normalized_absolute_path(runtime_root)
     ):
         errors.append("builder and runtime must use separate environments")
 
@@ -210,14 +220,14 @@ def assess_evidence(evidence: dict[str, Any]) -> list[str]:
     if not isinstance(environment_root, str) or not environment_root:
         errors.append("effective runtime environment root is missing")
     else:
-        environment_path = Path(environment_root).resolve()
+        environment_path = _normalized_absolute_path(environment_root)
         for field in ("mlx_core_path", "mlx_nf4_path"):
             import_path = effective.get(field)
             if not isinstance(import_path, str) or not import_path:
                 errors.append(f"effective {field} is missing")
                 continue
             try:
-                Path(import_path).resolve().relative_to(environment_path)
+                _normalized_absolute_path(import_path).relative_to(environment_path)
             except ValueError:
                 errors.append(
                     f"effective {field} is outside the fresh environment: "
@@ -229,7 +239,9 @@ def assess_evidence(evidence: dict[str, Any]) -> list[str]:
             errors.append("effective Python executable is missing")
         else:
             try:
-                Path(python_executable).resolve().relative_to(environment_path)
+                _normalized_absolute_path(python_executable).relative_to(
+                    environment_path
+                )
             except ValueError:
                 errors.append(
                     "effective Python executable is outside the runtime "

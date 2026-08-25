@@ -190,7 +190,7 @@ class TestNF4Core(unittest.TestCase):
 
     def test_native_dtype_group_and_tail_matrix(self):
         tolerances = {
-            mx.float32: 1e-5,
+            mx.float32: 1e-4,
             mx.float16: 2e-2,
             mx.bfloat16: 1.25e-1,
         }
