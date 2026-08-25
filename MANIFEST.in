@@ -3,4 +3,6 @@ include LICENSE
 include NOTICE
 include README.md
 recursive-include csrc *.cpp *.h
+recursive-include docs *.md
 recursive-include metal *.h *.metal
+recursive-include tools *.py

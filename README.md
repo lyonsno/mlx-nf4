@@ -132,11 +132,12 @@ python tools/install_smoke.py \
   --report /absolute/path/to/mlx-nf4-install-smoke.json
 ```
 
-That check builds a fresh wheel against the exact requested stock MLX version,
-installs it outside the checkout, exercises the native kernel against the
-reference path, runs the core tests, and records route, artifact, and numerical
-evidence in JSON. It fails loud on fallback imports, stale revisions, version
-substitution, missing binaries, blank output, or zero-test pseudo-success.
+That check builds a fresh source distribution and then a wheel against the exact
+requested stock MLX version, installs it outside the checkout, exercises the
+native kernel against the reference path, runs the core tests, and records
+route, artifact, and numerical evidence in JSON. It fails loud on fallback
+imports, stale revisions, version substitution, missing binaries, blank output,
+or zero-test pseudo-success.
 
 ## Performance context
 

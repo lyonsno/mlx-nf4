@@ -42,6 +42,13 @@ def complete_evidence() -> dict:
             "revision": "abc123",
             "fresh_work_directory": True,
         },
+        "source_distribution": {
+            "path": "/tmp/smoke/dist/mlx_nf4-0.1.0.tar.gz",
+            "filename": "mlx_nf4-0.1.0.tar.gz",
+            "size_bytes": 65536,
+            "sha256": "c" * 64,
+            "fresh_work_directory": True,
+        },
         "primary_check": {
             "checks_run": 2,
             "tests_run": 14,
@@ -145,6 +152,18 @@ class TestInstallSmokeEvidence(unittest.TestCase):
         self.assertTrue(any("snapshot" in error for error in assess_evidence(missing)))
         self.assertTrue(any("fresh" in error for error in assess_evidence(reused)))
         self.assertTrue(any("revision" in error for error in assess_evidence(wrong_revision)))
+
+    def test_rejects_missing_blank_or_reused_source_distribution(self):
+        missing = complete_evidence()
+        del missing["source_distribution"]
+        blank = complete_evidence()
+        blank["source_distribution"]["size_bytes"] = 0
+        reused = complete_evidence()
+        reused["source_distribution"]["fresh_work_directory"] = False
+
+        self.assertTrue(any("source_distribution" in error for error in assess_evidence(missing)))
+        self.assertTrue(any("source distribution" in error for error in assess_evidence(blank)))
+        self.assertTrue(any("fresh" in error for error in assess_evidence(reused)))
 
     def test_rejects_empty_or_failed_primary_output(self):
         evidence = complete_evidence()

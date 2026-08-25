@@ -185,6 +185,25 @@ def assess_evidence(evidence: dict[str, Any]) -> list[str]:
     if snapshot.get("fresh_work_directory") is not True:
         errors.append("source snapshot was not exported into a fresh work directory")
 
+    sdist = _mapping(
+        evidence.get("source_distribution"), "source_distribution", errors
+    )
+    sdist_filename = sdist.get("filename")
+    if not isinstance(sdist_filename, str) or not sdist_filename.endswith(".tar.gz"):
+        errors.append("source distribution filename is missing or invalid")
+    sdist_size = sdist.get("size_bytes")
+    if not isinstance(sdist_size, int) or sdist_size <= 0:
+        errors.append("source distribution is blank or has no recorded size")
+    sdist_sha = sdist.get("sha256")
+    if (
+        not isinstance(sdist_sha, str)
+        or len(sdist_sha) != 64
+        or any(character not in "0123456789abcdef" for character in sdist_sha)
+    ):
+        errors.append("source distribution sha256 is missing or invalid")
+    if sdist.get("fresh_work_directory") is not True:
+        errors.append("source distribution was not built in a fresh work directory")
+
     primary = _mapping(evidence.get("primary_check"), "primary_check", errors)
     checks_run = primary.get("checks_run")
     tests_run = primary.get("tests_run")
@@ -378,6 +397,7 @@ def main(argv: list[str] | None = None) -> int:
         "native_artifacts": {},
         "build_artifact": {},
         "source_snapshot": {},
+        "source_distribution": {},
         "primary_check": {},
         "commands": [],
         "last_trustworthy_evidence": None,
@@ -412,9 +432,11 @@ def main(argv: list[str] | None = None) -> int:
         work_directory = _fresh_work_directory(arguments.work_dir)
         environment_root = work_directory / ".venv"
         wheelhouse = work_directory / "wheelhouse"
+        distribution_directory = work_directory / "dist"
         source_snapshot = work_directory / "source"
         source_archive = work_directory / "source.tar"
         wheelhouse.mkdir()
+        distribution_directory.mkdir()
         source_snapshot.mkdir()
         report["work_directory"] = str(work_directory)
         report["effective"]["environment_root"] = str(environment_root)
@@ -467,6 +489,7 @@ def main(argv: list[str] | None = None) -> int:
                 "install",
                 "setuptools>=77",
                 "wheel",
+                "build",
                 "cmake>=3.27",
                 "nanobind==2.15.0",
                 f"mlx=={arguments.mlx_version}",
@@ -480,13 +503,46 @@ def main(argv: list[str] | None = None) -> int:
             [
                 str(environment_python),
                 "-m",
+                "build",
+                "--sdist",
+                "--no-isolation",
+                "--outdir",
+                str(distribution_directory),
+                str(source_snapshot),
+            ],
+            phase="build_source_distribution",
+            cwd=work_directory,
+            report=report,
+            report_path=report_path,
+        )
+        source_distributions = sorted(distribution_directory.glob("*.tar.gz"))
+        if len(source_distributions) != 1:
+            raise SmokeFailure(
+                "build_source_distribution",
+                "expected exactly one fresh source distribution, "
+                f"found {len(source_distributions)}",
+            )
+        source_distribution = source_distributions[0]
+        report["source_distribution"] = {
+            "path": str(source_distribution),
+            "filename": source_distribution.name,
+            "size_bytes": source_distribution.stat().st_size,
+            "sha256": _sha256(source_distribution),
+            "fresh_work_directory": True,
+        }
+        _write_report(report_path, report)
+
+        _run(
+            [
+                str(environment_python),
+                "-m",
                 "pip",
                 "wheel",
                 "--no-build-isolation",
                 "--no-deps",
                 "--wheel-dir",
                 str(wheelhouse),
-                str(source_snapshot),
+                str(source_distribution),
             ],
             phase="build_wheel",
             cwd=work_directory,

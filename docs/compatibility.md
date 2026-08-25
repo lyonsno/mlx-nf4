@@ -35,17 +35,18 @@ python tools/install_smoke.py \
 The command exports the exact clean Git revision into a fresh immutable source
 snapshot, creates and retains a fresh virtual environment, installs an exact
 stock MLX release, builds a new wheel without build isolation against that MLX
-version, installs the wheel non-editably, executes the native kernel against
-the explicit dequantize-then-matmul reference, and runs the core test suite from
-outside the original source tree. Independent smokes never share `build/`,
-egg-info, or another mutable producer-local directory.
+version by first building a fresh source distribution and then building the
+wheel from that sdist, installs the wheel non-editably, executes the native
+kernel against the explicit dequantize-then-matmul reference, and runs the core
+test suite from outside the original source tree. Independent smokes never
+share `build/`, egg-info, or another mutable producer-local directory.
 
 The build also binds CMake's Python discovery to the active build interpreter.
 That prevents headers or CMake metadata from another Python installation from
 being combined with the requested environment's MLX dynamic library.
 
 The JSON report distinguishes requested and effective source revision, MLX
-version, Python executable, source-archive SHA-256, imported module paths, wheel SHA-256, native
+version, Python executable, source-archive SHA-256, sdist SHA-256, imported module paths, wheel SHA-256, native
 artifact sizes, numerical error, and test count. It is written during every
 phase; an early failure records `failure_phase`, the command result, and the
 last trustworthy phase instead of disappearing before the primary artifact.
