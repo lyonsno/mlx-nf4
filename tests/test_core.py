@@ -166,6 +166,39 @@ class TestNF4Core(unittest.TestCase):
         self.assertEqual(actual.dtype, mx.float32)
         self.assertEqual(actual.tolist(), [0.25, 0.5, 1.0])
 
+    def test_reconstruct_bitsandbytes_rejects_uint8_without_nested_state(self):
+        with self.assertRaisesRegex(ValueError, "uint8 absmax requires complete nested"):
+            nf4.reconstruct_bitsandbytes_scales(
+                mx.array([0, 64, 128, 255], dtype=mx.uint8)
+            )
+
+    def test_reconstruct_bitsandbytes_requires_complete_nested_state(self):
+        quantized_absmax = mx.array([0, 64, 128, 255], dtype=mx.uint8)
+        nested_absmax = mx.array([2.0], dtype=mx.float32)
+        nested_quant_map = mx.linspace(-1.0, 1.0, 256).astype(mx.float32)
+
+        incomplete = (
+            {"nested_absmax": nested_absmax},
+            {"nested_quant_map": nested_quant_map},
+            {
+                "nested_absmax": nested_absmax,
+                "nested_quant_map": nested_quant_map,
+                "nested_block_size": 4,
+            },
+            {
+                "nested_absmax": nested_absmax,
+                "nested_quant_map": nested_quant_map,
+                "nested_offset": 0.5,
+            },
+        )
+        for kwargs in incomplete:
+            with self.subTest(kwargs=tuple(kwargs)):
+                with self.assertRaisesRegex(ValueError, "complete nested"):
+                    nf4.reconstruct_bitsandbytes_scales(
+                        quantized_absmax,
+                        **kwargs,
+                    )
+
     def test_reference_quantized_matmul_matches_dequantized_matmul(self):
         w = mx.random.normal((32, 64))
         x = mx.random.normal((3, 64))

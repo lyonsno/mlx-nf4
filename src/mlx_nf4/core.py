@@ -35,8 +35,8 @@ def reconstruct_bitsandbytes_scales(
     *,
     nested_absmax: mx.array | None = None,
     nested_quant_map: mx.array | None = None,
-    nested_offset: float = 0.0,
-    nested_block_size: int = 256,
+    nested_offset: float | None = None,
+    nested_block_size: int | None = None,
 ) -> mx.array:
     """Reconstruct float32 absmax scales from bitsandbytes quant state.
 
@@ -45,13 +45,25 @@ def reconstruct_bitsandbytes_scales(
     one ``nested_absmax`` multiplier per ``nested_block_size`` values and a
     scalar offset.
     """
-    nested_args = (nested_absmax, nested_quant_map)
+    nested_args = (
+        nested_absmax,
+        nested_quant_map,
+        nested_offset,
+        nested_block_size,
+    )
     if all(value is None for value in nested_args):
+        if absmax.dtype == mx.uint8:
+            raise ValueError(
+                "[reconstruct_bitsandbytes_scales] uint8 absmax requires complete "
+                "nested state: nested_absmax, nested_quant_map, nested_offset, "
+                "and nested_block_size."
+            )
         return absmax.astype(mx.float32)
     if any(value is None for value in nested_args):
         raise ValueError(
-            "[reconstruct_bitsandbytes_scales] nested_absmax and "
-            "nested_quant_map must be supplied together."
+            "[reconstruct_bitsandbytes_scales] complete nested state requires "
+            "nested_absmax, nested_quant_map, nested_offset, and "
+            "nested_block_size together."
         )
     if absmax.dtype != mx.uint8:
         raise ValueError(
