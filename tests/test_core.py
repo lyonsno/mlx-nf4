@@ -196,7 +196,7 @@ class TestNF4Core(unittest.TestCase):
         }
         for dtype, tolerance in tolerances.items():
             for group_size in nf4.NF4_GROUP_SIZES:
-                for output_dims in (1, 31, 33, 65):
+                for output_dims in (1, 31, 32, 33, 65):
                     with self.subTest(
                         dtype=str(dtype),
                         group_size=group_size,

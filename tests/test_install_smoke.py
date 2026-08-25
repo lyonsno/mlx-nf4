@@ -66,7 +66,7 @@ def complete_evidence() -> dict:
             "fresh_work_directory": True,
         },
         "primary_check": {
-            "checks_run": 36,
+            "checks_run": 45,
             "tests_run": 14,
             "max_abs_error": 0.00001,
             "tolerance": 0.0001,
@@ -85,7 +85,7 @@ def complete_evidence() -> dict:
                     ("bfloat16", 1.25e-1),
                 )
                 for group_size in (32, 64, 128)
-                for output_dims in (1, 31, 33, 65)
+                for output_dims in (1, 31, 32, 33, 65)
             ],
         },
         "macho_audit": {
@@ -194,6 +194,21 @@ class TestInstallSmokeEvidence(unittest.TestCase):
 
         self.assertTrue(
             any("native case" in error for error in assess_evidence(evidence))
+        )
+
+    def test_rejects_tail_only_native_matrix_without_aligned_specialization(self):
+        evidence = complete_evidence()
+        evidence["primary_check"]["native_cases"] = [
+            case
+            for case in evidence["primary_check"]["native_cases"]
+            if case["output_dims"] != 32
+        ]
+
+        errors = assess_evidence(evidence)
+
+        self.assertTrue(
+            any("native case" in error and "32" in error for error in errors),
+            errors,
         )
 
     def test_accepts_macos_var_symlink_for_fresh_environment(self):

@@ -55,7 +55,7 @@ for dtype_name, dtype, tolerance in (
     ("bfloat16", mx.bfloat16, 1.25e-1),
 ):
     for group_size in nf4.NF4_GROUP_SIZES:
-        for output_dims in (1, 31, 33, 65):
+        for output_dims in (1, 31, 32, 33, 65):
             weight = mx.reshape(
                 mx.linspace(-1.0, 1.0, output_dims * group_size),
                 (output_dims, group_size),
@@ -387,7 +387,7 @@ def assess_evidence(evidence: dict[str, Any]) -> list[str]:
         (dtype, group_size, output_dims)
         for dtype in ("float32", "float16", "bfloat16")
         for group_size in (32, 64, 128)
-        for output_dims in (1, 31, 33, 65)
+        for output_dims in (1, 31, 32, 33, 65)
     }
     native_cases = primary.get("native_cases")
     observed_cases: set[tuple[str, int, int]] = set()

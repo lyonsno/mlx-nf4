@@ -140,7 +140,7 @@ python tools/install_smoke.py \
 That check builds a fresh source distribution and wheel in builder environment
 A, rejects absolute builder paths in the wheel's Mach-O payloads, then creates
 a separate build-tool-free runtime environment B containing only stock MLX and
-the non-editable wheel. Runtime B exercises 36 native/reference cases spanning
+the non-editable wheel. Runtime B exercises 45 native/reference cases spanning
 float32, float16, bfloat16, every supported group size, aligned and tail output
 rows, and zero-scale groups before running the installed core tests. The JSON
 receipt records the effective Python, macOS, architecture, hardware model,
