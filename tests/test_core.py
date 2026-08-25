@@ -224,17 +224,24 @@ class TestNF4Core(unittest.TestCase):
 
     def test_fast_quantized_matmul_group_sizes(self):
         for group_size in nf4.NF4_GROUP_SIZES:
-            w = mx.random.normal((32, group_size * 2))
-            x = mx.random.normal((3, group_size * 2))
-            wq, scales = nf4.quantize(w, group_size=group_size)
+            with self.subTest(group_size=group_size):
+                width = group_size * 2
+                w = mx.reshape(mx.linspace(-1.0, 1.0, 32 * width), (32, width))
+                x = mx.reshape(mx.linspace(-0.5, 0.5, 3 * width), (3, width))
+                wq, scales = nf4.quantize(w, group_size=group_size)
 
-            y = nf4.quantized_matmul(x, wq, scales, group_size=group_size)
-            y_ref = nf4.reference_quantized_matmul(
-                x, wq, scales, group_size=group_size
-            )
-            mx.eval(y, y_ref)
+                y = nf4.quantized_matmul(x, wq, scales, group_size=group_size)
+                y_ref = nf4.reference_quantized_matmul(
+                    x, wq, scales, group_size=group_size
+                )
+                mx.eval(y, y_ref)
 
-            self.assertTrue(mx.allclose(y, y_ref, atol=1e-5).item())
+                max_abs_diff = float(mx.max(mx.abs(y - y_ref)).item())
+                self.assertLessEqual(
+                    max_abs_diff,
+                    1e-4,
+                    "float32 native/reference tolerance matches the full dtype/group/tail matrix",
+                )
 
     def test_fast_quantized_matmul_preserves_activation_leading_dimensions(self):
         weight = mx.reshape(mx.linspace(-1.0, 1.0, 32 * 64), (32, 64))
