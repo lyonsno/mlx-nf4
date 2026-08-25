@@ -93,6 +93,20 @@ class TestInstallSmokeEvidence(unittest.TestCase):
             any("environment" in error for error in assess_evidence(evidence))
         )
 
+    def test_accepts_macos_var_symlink_for_fresh_environment(self):
+        evidence = complete_evidence()
+        evidence["effective"]["environment_root"] = "/var/folders/smoke/.venv"
+        evidence["effective"]["mlx_core_path"] = (
+            "/private/var/folders/smoke/.venv/lib/python3.12/site-packages/mlx/core.so"
+        )
+        evidence["effective"]["mlx_nf4_path"] = (
+            "/private/var/folders/smoke/.venv/lib/python3.12/site-packages/mlx_nf4/__init__.py"
+        )
+
+        errors = assess_evidence(evidence)
+
+        self.assertFalse(any("environment" in error for error in errors), errors)
+
     def test_rejects_missing_or_blank_native_artifacts(self):
         missing = complete_evidence()
         del missing["native_artifacts"]["mlx_nf4.metallib"]

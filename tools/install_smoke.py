@@ -126,14 +126,14 @@ def assess_evidence(evidence: dict[str, Any]) -> list[str]:
     if not isinstance(environment_root, str) or not environment_root:
         errors.append("effective environment root is missing")
     else:
-        environment_path = Path(environment_root)
+        environment_path = Path(environment_root).resolve()
         for field in ("mlx_core_path", "mlx_nf4_path"):
             import_path = effective.get(field)
             if not isinstance(import_path, str) or not import_path:
                 errors.append(f"effective {field} is missing")
                 continue
             try:
-                Path(import_path).relative_to(environment_path)
+                Path(import_path).resolve().relative_to(environment_path)
             except ValueError:
                 errors.append(
                     f"effective {field} is outside the fresh environment: "
