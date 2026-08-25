@@ -19,12 +19,37 @@ from safetensors import safe_open
 MODEL_ID = "manu02/gpt2-bnb-4bit-nf4-dq"
 MODEL_REVISION = "7744ff22be99f562bdaa444612a35a20bf995999"
 QUANTIZED_PROJECTION_COUNT = 48
+EXPECTED_MLX_NF4_URL = "https://github.com/lyonsno/mlx-nf4.git"
+EXPECTED_MLX_NF4_COMMIT = "6fa1281578327b6ee44c04886749e122c28ea00d"
+EXPECTED_MLX_VERSION = "0.32.2"
+
+
+def _direct_url(distribution_name: str):
+    distribution = metadata.distribution(distribution_name)
+    direct_url_text = distribution.read_text("direct_url.json")
+    return json.loads(direct_url_text) if direct_url_text else None
 
 
 def _package_identity() -> dict:
-    distribution = metadata.distribution("mlx-nf4")
-    direct_url_text = distribution.read_text("direct_url.json")
-    direct_url = json.loads(direct_url_text) if direct_url_text else None
+    direct_url = _direct_url("mlx-nf4")
+    actual_url = direct_url.get("url") if direct_url else None
+    actual_commit = (direct_url or {}).get("vcs_info", {}).get("commit_id")
+    if actual_url != EXPECTED_MLX_NF4_URL or actual_commit != EXPECTED_MLX_NF4_COMMIT:
+        raise RuntimeError(
+            "mlx-nf4 provenance mismatch: expected "
+            f"{EXPECTED_MLX_NF4_URL}@{EXPECTED_MLX_NF4_COMMIT}, got "
+            f"{actual_url}@{actual_commit}"
+        )
+
+    mlx_version = metadata.version("mlx")
+    mlx_direct_url = _direct_url("mlx")
+    if mlx_version != EXPECTED_MLX_VERSION or mlx_direct_url is not None:
+        raise RuntimeError(
+            "stock MLX provenance mismatch: expected wheel-installed "
+            f"mlx=={EXPECTED_MLX_VERSION}, got version={mlx_version}, "
+            f"direct_url={mlx_direct_url}"
+        )
+
     extension = import_module("mlx_nf4._ext")
     package_root = Path(nf4.__file__).resolve().parent
     return {
@@ -32,7 +57,14 @@ def _package_identity() -> dict:
         "module_path": str(Path(nf4.__file__).resolve()),
         "native_extension_path": str(Path(extension.__file__).resolve()),
         "metal_library_path": str(package_root / "mlx_nf4.metallib"),
+        "expected_package_url": EXPECTED_MLX_NF4_URL,
+        "expected_package_commit": EXPECTED_MLX_NF4_COMMIT,
         "direct_url": direct_url,
+        "mlx": {
+            "version": mlx_version,
+            "module_path": str(Path(mx.__file__).resolve()),
+            "direct_url": mlx_direct_url,
+        },
     }
 
 

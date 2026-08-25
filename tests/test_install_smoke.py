@@ -110,6 +110,27 @@ def complete_evidence() -> dict:
 
 
 class TestInstallSmokeEvidence(unittest.TestCase):
+    def test_gpt2_example_fails_closed_on_exact_runtime_provenance(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "examples"
+            / "gpt2_bitsandbytes.py"
+        ).read_text()
+
+        self.assertIn(
+            'EXPECTED_MLX_NF4_URL = "https://github.com/lyonsno/mlx-nf4.git"',
+            source,
+        )
+        self.assertIn(
+            'EXPECTED_MLX_NF4_COMMIT = "6fa1281578327b6ee44c04886749e122c28ea00d"',
+            source,
+        )
+        self.assertIn('EXPECTED_MLX_VERSION = "0.32.2"', source)
+        self.assertIn('"mlx": {', source)
+        self.assertIn('"direct_url": mlx_direct_url', source)
+        self.assertIn("mlx-nf4 provenance mismatch", source)
+        self.assertIn("stock MLX provenance mismatch", source)
+
     def test_run_exposes_interpreter_sibling_build_tools_on_path(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
