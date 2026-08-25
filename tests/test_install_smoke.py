@@ -36,6 +36,12 @@ def complete_evidence() -> dict:
             "sha256": "a" * 64,
             "fresh_work_directory": True,
         },
+        "source_snapshot": {
+            "path": "/tmp/smoke/source",
+            "archive_sha256": "b" * 64,
+            "revision": "abc123",
+            "fresh_work_directory": True,
+        },
         "primary_check": {
             "checks_run": 2,
             "tests_run": 14,
@@ -127,6 +133,18 @@ class TestInstallSmokeEvidence(unittest.TestCase):
         self.assertTrue(any("wheel" in error for error in assess_evidence(missing)))
         self.assertTrue(any("wheel" in error for error in assess_evidence(blank)))
         self.assertTrue(any("fresh" in error for error in assess_evidence(reused)))
+
+    def test_rejects_missing_reused_or_wrong_revision_source_snapshot(self):
+        missing = complete_evidence()
+        del missing["source_snapshot"]
+        reused = complete_evidence()
+        reused["source_snapshot"]["fresh_work_directory"] = False
+        wrong_revision = complete_evidence()
+        wrong_revision["source_snapshot"]["revision"] = "deadbeef"
+
+        self.assertTrue(any("snapshot" in error for error in assess_evidence(missing)))
+        self.assertTrue(any("fresh" in error for error in assess_evidence(reused)))
+        self.assertTrue(any("revision" in error for error in assess_evidence(wrong_revision)))
 
     def test_rejects_empty_or_failed_primary_output(self):
         evidence = complete_evidence()

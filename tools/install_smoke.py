@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 from datetime import datetime, timezone
 from typing import Any
@@ -171,6 +172,19 @@ def assess_evidence(evidence: dict[str, Any]) -> list[str]:
     if wheel.get("fresh_work_directory") is not True:
         errors.append("wheel was not built in a fresh work directory")
 
+    snapshot = _mapping(evidence.get("source_snapshot"), "source_snapshot", errors)
+    if snapshot.get("revision") != requested.get("revision"):
+        errors.append("source snapshot revision does not match the requested revision")
+    snapshot_sha = snapshot.get("archive_sha256")
+    if (
+        not isinstance(snapshot_sha, str)
+        or len(snapshot_sha) != 64
+        or any(character not in "0123456789abcdef" for character in snapshot_sha)
+    ):
+        errors.append("source snapshot archive sha256 is missing or invalid")
+    if snapshot.get("fresh_work_directory") is not True:
+        errors.append("source snapshot was not exported into a fresh work directory")
+
     primary = _mapping(evidence.get("primary_check"), "primary_check", errors)
     checks_run = primary.get("checks_run")
     tests_run = primary.get("tests_run")
@@ -263,6 +277,25 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _extract_source_archive(archive_path: Path, destination: Path) -> None:
+    destination = destination.resolve()
+    with tarfile.open(archive_path, "r") as archive:
+        for member in archive.getmembers():
+            if not (member.isfile() or member.isdir()):
+                raise SmokeFailure(
+                    "export_source_snapshot",
+                    f"source archive contains unsupported entry {member.name!r}",
+                )
+            try:
+                (destination / member.name).resolve().relative_to(destination)
+            except ValueError as error:
+                raise SmokeFailure(
+                    "export_source_snapshot",
+                    f"source archive entry escapes its destination: {member.name!r}",
+                ) from error
+        archive.extractall(destination)
+
+
 def _git_output(source: Path, *arguments: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(source), *arguments],
@@ -339,6 +372,7 @@ def main(argv: list[str] | None = None) -> int:
         "effective": {},
         "native_artifacts": {},
         "build_artifact": {},
+        "source_snapshot": {},
         "primary_check": {},
         "commands": [],
         "last_trustworthy_evidence": None,
@@ -373,9 +407,38 @@ def main(argv: list[str] | None = None) -> int:
         work_directory = _fresh_work_directory(arguments.work_dir)
         environment_root = work_directory / ".venv"
         wheelhouse = work_directory / "wheelhouse"
+        source_snapshot = work_directory / "source"
+        source_archive = work_directory / "source.tar"
         wheelhouse.mkdir()
+        source_snapshot.mkdir()
         report["work_directory"] = str(work_directory)
         report["effective"]["environment_root"] = str(environment_root)
+        _write_report(report_path, report)
+
+        _run(
+            [
+                "git",
+                "-C",
+                str(source),
+                "archive",
+                "--format=tar",
+                f"--output={source_archive}",
+                effective_revision,
+            ],
+            phase="export_source_snapshot",
+            cwd=work_directory,
+            report=report,
+            report_path=report_path,
+        )
+        _extract_source_archive(source_archive, source_snapshot)
+        report["source_snapshot"] = {
+            "path": str(source_snapshot),
+            "archive_path": str(source_archive),
+            "archive_sha256": _sha256(source_archive),
+            "revision": effective_revision,
+            "fresh_work_directory": True,
+        }
+        report["last_trustworthy_evidence"] = "export_source_snapshot"
         _write_report(report_path, report)
 
         if not arguments.uv:
@@ -397,7 +460,7 @@ def main(argv: list[str] | None = None) -> int:
                 "-m",
                 "pip",
                 "install",
-                "setuptools>=68",
+                "setuptools>=77",
                 "wheel",
                 "cmake>=3.27",
                 "nanobind==2.15.0",
@@ -418,7 +481,7 @@ def main(argv: list[str] | None = None) -> int:
                 "--no-deps",
                 "--wheel-dir",
                 str(wheelhouse),
-                str(source),
+                str(source_snapshot),
             ],
             phase="build_wheel",
             cwd=work_directory,
@@ -476,7 +539,7 @@ def main(argv: list[str] | None = None) -> int:
                 "unittest",
                 "discover",
                 "-s",
-                str(source / "tests"),
+                str(source_snapshot / "tests"),
                 "-p",
                 "test_core.py",
                 "-v",

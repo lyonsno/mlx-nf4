@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel", "cmake>=3.27", "nanobind==2.15.0", "mlx>=0.31.2"]
+requires = ["setuptools>=77", "wheel", "cmake>=3.27", "nanobind==2.15.0", "mlx>=0.31.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,12 +8,12 @@ version = "0.1.0"
 description = "NF4 / NormalFloat4 quantization helpers and Metal kernels for MLX"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {file = "LICENSE"}
+license = "MIT"
+license-files = ["LICENSE", "NOTICE"]
 authors = [{name = "Noah Lyons"}]
 keywords = ["mlx", "metal", "nf4", "quantization", "apple-silicon"]
 classifiers = [
   "Development Status :: 3 - Alpha",
-  "License :: OSI Approved :: MIT License",
   "Operating System :: MacOS :: MacOS X",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
