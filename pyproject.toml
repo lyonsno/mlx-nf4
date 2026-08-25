@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mlx-nf4"
 version = "0.1.0"
-description = "NF4 / NormalFloat4 quantization helpers and Metal kernels for MLX"
+description = "NF4 quantization and native Metal matrix multiplication for MLX"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"

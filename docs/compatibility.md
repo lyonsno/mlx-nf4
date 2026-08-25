@@ -1,28 +1,71 @@
-# Compatibility and install evidence
+# Compatibility
 
-`mlx-nf4` is a native Apple-silicon extension. A successful Python import is
-not sufficient installation evidence: the C++ binding, native dynamic library,
-Metal library, and an actual NF4 matmul must all be present and exercised.
+`mlx-nf4` is a native Apple-silicon MLX extension. Installation builds a C++
+binding, a dynamic library, and a Metal library; successful use requires all
+three artifacts and a working Metal device.
 
-## Supported surface
+## Requirements
 
-- macOS on Apple silicon with Metal support
+- macOS on Apple silicon
 - Python 3.10 or newer
 - MLX 0.32.2 or newer
 - Xcode command-line tools when building from source
+- CMake 3.27 or newer and nanobind 2.15.0, installed automatically as Python
+  build requirements
 
-The evidence command also uses `uv` to create and seed its disposable virtual
-environment. This is a smoke-tool dependency, not an `mlx-nf4` runtime or build
-dependency; ordinary package installation remains a standard Python build.
+The package runtime dependency is MLX. CMake, nanobind, setuptools, and wheel
+are build dependencies and are not required in the consuming runtime after a
+wheel has been produced.
 
-The native operation currently accepts two-dimensional activations and packed
-weights, `transpose=True`, group sizes 32, 64, and 128, and float32, float16,
-or bfloat16 activations. Batched quantized matmul and gather quantized matmul
-are outside the 0.1 native surface.
+## Verified combinations
 
-## Reproducible clean-install check
+| Hardware | macOS | Python | MLX | Result |
+| --- | --- | --- | --- | --- |
+| Apple M4 Max (`Mac16,5`) | 15.6 (`24G84`) | 3.12.12 | 0.32.2 | pass |
+| Apple M2 Pro (`Mac14,9`) | 26.5.1 (`25F80`) | 3.12.12 | 0.32.2 | pass |
 
-Run the smoke from a clean checkout at an exact commit:
+Both machines independently built from the same exact source snapshot. On each
+host, a fresh builder produced an sdist and native wheel; a separate runtime
+containing stock MLX and no build-only packages installed that wheel and passed:
+
+- 45 native/reference cases
+- float32, float16, and bfloat16 activations
+- group sizes 32, 64, and 128
+- aligned output width 32 and tail widths 1, 31, 33, and 65
+- zero-scale groups
+- 19 installed-package tests
+- Mach-O load-command inspection for both native libraries
+
+These rows are verified routes, not the full theoretical compatibility set.
+Python 3.10, 3.11, 3.13+, other macOS releases, other Apple GPUs, and
+cross-host interchange of prebuilt wheels have not yet been promoted as tested
+combinations.
+
+## Native operation boundary
+
+The 0.1 native matmul accepts:
+
+- two-dimensional activation, packed-weight, and scale tensors
+- `transpose=True`
+- group sizes 32, 64, and 128
+- float32, float16, or bfloat16 activations
+- `uint32` packed weights
+- float32 absolute-maximum group scales
+
+It does not currently implement batched, non-transposed, or gather quantized
+matmul. The Python package exposes an explicit reference path for comparison,
+but the native API never silently substitutes that slower route.
+
+## MLX version boundary
+
+MLX 0.32.2 is the first verified release for this package. MLX 0.31.2 was
+tested during extraction: the source built and installed, but its native
+nanobind boundary rejected MLX arrays. `mlx-nf4` therefore requires
+`mlx>=0.32.2` instead of carrying two version-dependent native bindings.
+
+## Reproduce a clean build and install
+
+From a clean checkout at an exact commit:
 
 ```sh
 python tools/install_smoke.py \
@@ -32,47 +75,28 @@ python tools/install_smoke.py \
   --report /absolute/path/to/mlx-nf4-install-smoke.json
 ```
 
-The command exports the exact clean Git revision into a fresh immutable source
-snapshot and creates two retained virtual environments. Builder A installs the
-declared build contract and exact stock MLX release, builds a fresh source
-distribution, and builds the wheel from that sdist. The harness then audits the
-wheel's native payloads with `otool` and rejects non-system absolute load paths.
-Runtime B is created independently, installs stock MLX and the wheel without
-build dependencies, executes the native matrix against the explicit
-dequantize-then-matmul reference, and runs the core test suite from outside the
-original source tree. Independent smokes never share `build/`, egg-info, a
-virtual environment, or another mutable producer-local directory.
+The harness uses `uv` to create disposable environments. `uv` is a harness
+dependency, not an `mlx-nf4` runtime dependency.
 
-The build also binds CMake's Python discovery to the active build interpreter.
-That prevents headers or CMake metadata from another Python installation from
-being combined with the requested environment's MLX dynamic library.
+The procedure:
 
-The JSON report distinguishes requested and effective source revision, MLX
-version, Python base and runtime executables, builder/runtime roots, source-
-archive SHA-256, sdist SHA-256, imported module paths, wheel SHA-256, Mach-O
-load commands, native artifact sizes, per-case numerical errors, test count,
-hostname, macOS version/build, architecture, hardware model, and Metal device.
-It is written during every phase; an early failure records `failure_phase`, the
-command result, and the last trustworthy phase instead of disappearing before
-the primary artifact.
+1. exports the exact clean Git revision into a fresh source snapshot;
+2. creates builder environment A and installs the declared build requirements;
+3. builds an sdist and then a wheel from that sdist;
+4. confirms the wheel build resolves CMake inside builder A;
+5. audits the wheel's Mach-O paths for build-host leakage;
+6. creates an independent runtime environment B;
+7. installs stock MLX and the non-editable wheel without build dependencies;
+8. runs the 45-case native/reference matrix and installed package tests.
 
-The evidence validator deliberately rejects source, revision, Python, or MLX
-substitution; imports leaking from the source checkout; builder/runtime
-aliasing; build-only packages in runtime; absent or blank native payloads;
-absolute builder rpaths; incomplete dtype/group/tail coverage; reused wheel
-state; zero-test output; and numerical error beyond each case's tolerance.
+The JSON report records the requested and effective source revision, Python and
+MLX versions, builder/runtime roots, source and artifact hashes, wheel tag,
+native artifact sizes, Mach-O load commands, host and Metal identity, per-case
+errors, test count, and every command result. If a phase fails, the same report
+records the failure phase and last successful phase.
 
-## Verified combinations
-
-The earlier single-environment route against stock MLX 0.32.2 is retained as
-development evidence only; fresh review showed that it could mask builder-path
-leakage and that its float32-aligned probe did not cover the advertised native
-surface. The exact corrected dual-environment M4 and M2 receipts are recorded
-only after those routes pass. A version range in package metadata is a
-compatibility policy, not a substitute for route-specific receipts.
-
-Stock MLX 0.31.2 is a measured unsupported boundary for 0.1. The exact source
-snapshot builds and installs, but the native call rejects MLX arrays at the
-nanobind domain boundary. MLX 0.32.2 requires the newer nanobind contract, and
-the package deliberately does not maintain two version-dependent native build
-routes.
+The validator rejects source or version substitution, dirty or reused source,
+imports leaking from the checkout, builder/runtime aliasing, host-global CMake
+substitution, build-only packages in the runtime, missing native payloads,
+absolute builder paths, incomplete native coverage, numerical failures, and
+zero-test success claims.
