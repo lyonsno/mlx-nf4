@@ -1,3 +1,5 @@
+from pathlib import Path
+import json
 import unittest
 
 import mlx.core as mx
@@ -74,6 +76,13 @@ class TestNF4Core(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "float32"):
             nf4.dequantize(wq, scales.astype(mx.float16))
 
+    def test_dequantize_rejects_scale_prefix_broadcast(self):
+        packed = mx.zeros((2, 8), dtype=mx.uint32)
+        broadcastable_but_wrong = mx.ones((1, 1), dtype=mx.float32)
+
+        with self.assertRaisesRegex(ValueError, "scale shapes disagree"):
+            nf4.dequantize(packed, broadcastable_but_wrong)
+
     def test_pack_uint8_to_uint32_round_trips_nibble_orders(self):
         w = mx.reshape(mx.linspace(-2.0, 2.0, 128), (2, 64))
         wq, _ = nf4.quantize(w)
@@ -94,6 +103,31 @@ class TestNF4Core(unittest.TestCase):
             nf4.pack_uint8_to_uint32(mx.ones((2, 3), dtype=mx.uint8))
         with self.assertRaisesRegex(ValueError, "source_order"):
             nf4.pack_uint8_to_uint32(mx.ones((2, 4), dtype=mx.uint8), source_order="bnb")
+
+    def test_bitsandbytes_observed_fixture_matches_packing_contract(self):
+        fixture_path = (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "ideogram4_input_proj_bitsandbytes_nf4.json"
+        )
+        fixture = json.loads(fixture_path.read_text())
+        packed_bytes = fixture["packed_byte_prefix"]
+        decoded_indices = [
+            nibble
+            for byte in packed_bytes
+            for nibble in (byte >> 4, byte & 0x0F)
+        ]
+
+        self.assertEqual(decoded_indices, fixture["expected_logical_indices"])
+
+        repacked = nf4.pack_uint8_to_uint32(
+            mx.array([packed_bytes], dtype=mx.uint8), source_order="high_first"
+        )
+        mx.eval(repacked)
+        self.assertEqual(
+            [int(value) for value in repacked[0].tolist()],
+            fixture["expected_mlx_uint32_words"],
+        )
 
     def test_reference_quantized_matmul_matches_dequantized_matmul(self):
         w = mx.random.normal((32, 64))
@@ -131,6 +165,66 @@ class TestNF4Core(unittest.TestCase):
             mx.eval(y, y_ref)
 
             self.assertTrue(mx.allclose(y, y_ref, atol=1e-5).item())
+
+    def test_native_rejects_transpose_false(self):
+        x = mx.ones((2, 64), dtype=mx.float32)
+        packed = mx.zeros((8, 32), dtype=mx.uint32)
+        scales = mx.ones((1, 32), dtype=mx.float32)
+
+        with self.assertRaisesRegex(ValueError, "transpose=False"):
+            nf4.quantized_matmul(x, packed, scales, transpose=False)
+
+    def test_transposed_loader_bounds_remaining_output_rows(self):
+        header = (
+            Path(__file__).resolve().parents[1]
+            / "metal"
+            / "mlx_nf4"
+            / "nf4_quantized.h"
+        ).read_text()
+
+        self.assertIn(
+            "reduction_dim == 1 && bi >= src_tile_dim.y",
+            header,
+            "the transposed loader must bound weight rows by remaining output rows",
+        )
+
+    def test_native_dtype_group_and_tail_matrix(self):
+        tolerances = {
+            mx.float32: 1e-5,
+            mx.float16: 2e-2,
+            mx.bfloat16: 1.25e-1,
+        }
+        for dtype, tolerance in tolerances.items():
+            for group_size in nf4.NF4_GROUP_SIZES:
+                for output_dims in (1, 31, 33, 65):
+                    with self.subTest(
+                        dtype=str(dtype),
+                        group_size=group_size,
+                        output_dims=output_dims,
+                    ):
+                        weight = mx.reshape(
+                            mx.linspace(-1.0, 1.0, output_dims * group_size),
+                            (output_dims, group_size),
+                        )
+                        weight = mx.concatenate(
+                            [mx.zeros((1, group_size)), weight[1:]], axis=0
+                        )
+                        x = mx.reshape(
+                            mx.linspace(-0.75, 0.75, 2 * group_size),
+                            (2, group_size),
+                        ).astype(dtype)
+                        packed, scales = nf4.quantize(weight, group_size=group_size)
+                        actual = nf4.quantized_matmul(
+                            x, packed, scales, group_size=group_size
+                        )
+                        reference = nf4.reference_quantized_matmul(
+                            x, packed, scales, group_size=group_size
+                        )
+                        mx.eval(actual, reference)
+
+                        self.assertTrue(
+                            mx.allclose(actual, reference, atol=tolerance).item()
+                        )
 
     def test_nf4_linear_reference_forward(self):
         linear = nn.Linear(64, 32)

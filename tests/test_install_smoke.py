@@ -16,14 +16,29 @@ def complete_evidence() -> dict:
             "source": "git+https://example.invalid/mlx-nf4@abc123",
             "revision": "abc123",
             "mlx_version": "0.32.2",
+            "python": "/opt/python/bin/python3",
         },
         "effective": {
             "source": "git+https://example.invalid/mlx-nf4@abc123",
             "revision": "abc123",
             "mlx_version": "0.32.2",
-            "mlx_core_path": "/tmp/smoke/.venv/lib/python3.12/site-packages/mlx/core/__init__.py",
-            "mlx_nf4_path": "/tmp/smoke/.venv/lib/python3.12/site-packages/mlx_nf4/__init__.py",
-            "environment_root": "/tmp/smoke/.venv",
+            "python": "/opt/python/bin/python3",
+            "mlx_core_path": "/tmp/smoke/runtime-venv/lib/python3.12/site-packages/mlx/core/__init__.py",
+            "mlx_nf4_path": "/tmp/smoke/runtime-venv/lib/python3.12/site-packages/mlx_nf4/__init__.py",
+            "environment_root": "/tmp/smoke/runtime-venv",
+            "builder_environment_root": "/tmp/smoke/builder-venv",
+            "runtime_environment_root": "/tmp/smoke/runtime-venv",
+            "python_executable": "/tmp/smoke/runtime-venv/bin/python",
+            "python_version": "3.12.12",
+            "host_identity": {
+                "hostname": "m4max.example",
+                "machine": "arm64",
+                "macos_version": "15.0",
+                "macos_build": "24A335",
+                "hardware_model": "Mac16,5",
+                "metal_device": "Apple M4 Max",
+            },
+            "build_only_packages_present": {},
         },
         "native_artifacts": {
             "_ext": {"exists": True, "size_bytes": 4096},
@@ -50,11 +65,35 @@ def complete_evidence() -> dict:
             "fresh_work_directory": True,
         },
         "primary_check": {
-            "checks_run": 2,
+            "checks_run": 36,
             "tests_run": 14,
             "max_abs_error": 0.00001,
             "tolerance": 0.0001,
             "output_shape": [3, 32],
+            "native_cases": [
+                {
+                    "dtype": dtype,
+                    "group_size": group_size,
+                    "output_dims": output_dims,
+                    "max_abs_error": 0.0,
+                    "tolerance": tolerance,
+                }
+                for dtype, tolerance in (
+                    ("float32", 1e-5),
+                    ("float16", 2e-2),
+                    ("bfloat16", 1.25e-1),
+                )
+                for group_size in (32, 64, 128)
+                for output_dims in (1, 31, 33, 65)
+            ],
+        },
+        "macho_audit": {
+            "files_checked": 2,
+            "forbidden_paths": [],
+            "load_commands": {
+                "mlx_nf4/_ext.cpython-312-darwin.so": ["@loader_path"],
+                "mlx_nf4/libmlx_nf4_native.dylib": [],
+            },
         },
     }
 
@@ -98,6 +137,14 @@ class TestInstallSmokeEvidence(unittest.TestCase):
             any("MLX" in error for error in assess_evidence(evidence))
         )
 
+    def test_rejects_silently_substituted_python_base(self):
+        evidence = complete_evidence()
+        evidence["effective"]["python"] = "/opt/other-python/bin/python3"
+
+        self.assertTrue(
+            any("Python base" in error for error in assess_evidence(evidence))
+        )
+
     def test_rejects_imports_outside_the_fresh_environment(self):
         evidence = complete_evidence()
         evidence["effective"]["mlx_nf4_path"] = "/worktree/src/mlx_nf4/__init__.py"
@@ -106,14 +153,62 @@ class TestInstallSmokeEvidence(unittest.TestCase):
             any("environment" in error for error in assess_evidence(evidence))
         )
 
+    def test_rejects_builder_and_runtime_environment_aliasing(self):
+        evidence = complete_evidence()
+        evidence["effective"]["runtime_environment_root"] = evidence["effective"][
+            "builder_environment_root"
+        ]
+
+        self.assertTrue(
+            any("separate" in error for error in assess_evidence(evidence))
+        )
+
+    def test_rejects_absolute_builder_paths_in_macho_payloads(self):
+        evidence = complete_evidence()
+        evidence["macho_audit"]["forbidden_paths"] = [
+            "/tmp/smoke/builder-venv/lib/python3.12/site-packages/mlx/lib"
+        ]
+
+        self.assertTrue(
+            any("Mach-O" in error for error in assess_evidence(evidence))
+        )
+
+    def test_rejects_missing_effective_python_or_host_identity(self):
+        evidence = complete_evidence()
+        del evidence["effective"]["python_executable"]
+        evidence["effective"]["host_identity"].pop("hardware_model")
+
+        errors = assess_evidence(evidence)
+
+        self.assertTrue(any("Python" in error for error in errors))
+        self.assertTrue(any("hardware_model" in error for error in errors))
+
+    def test_rejects_incomplete_native_dtype_group_tail_matrix(self):
+        evidence = complete_evidence()
+        evidence["primary_check"]["native_cases"] = [
+            case
+            for case in evidence["primary_check"]["native_cases"]
+            if case["dtype"] == "float32"
+        ]
+
+        self.assertTrue(
+            any("native case" in error for error in assess_evidence(evidence))
+        )
+
     def test_accepts_macos_var_symlink_for_fresh_environment(self):
         evidence = complete_evidence()
-        evidence["effective"]["environment_root"] = "/var/folders/smoke/.venv"
+        evidence["effective"]["environment_root"] = "/var/folders/smoke/runtime-venv"
+        evidence["effective"]["runtime_environment_root"] = (
+            "/var/folders/smoke/runtime-venv"
+        )
+        evidence["effective"]["python_executable"] = (
+            "/private/var/folders/smoke/runtime-venv/bin/python"
+        )
         evidence["effective"]["mlx_core_path"] = (
-            "/private/var/folders/smoke/.venv/lib/python3.12/site-packages/mlx/core.so"
+            "/private/var/folders/smoke/runtime-venv/lib/python3.12/site-packages/mlx/core.so"
         )
         evidence["effective"]["mlx_nf4_path"] = (
-            "/private/var/folders/smoke/.venv/lib/python3.12/site-packages/mlx_nf4/__init__.py"
+            "/private/var/folders/smoke/runtime-venv/lib/python3.12/site-packages/mlx_nf4/__init__.py"
         )
 
         errors = assess_evidence(evidence)

@@ -16,6 +16,11 @@ distribution terms and attribution boundary.
 
 The 16-entry NormalFloat4 lookup table is the standard NF4 codebook. The
 package's intake helpers support its native low-nibble-first byte layout and a
-high-nibble-first boundary for bitsandbytes-style packed tensors. The latter
-expects already reconstructed float32 absolute-maximum scales; safetensors
-parsing and nested/double-quantization reconstruction remain loader concerns.
+high-nibble-first boundary for bitsandbytes packed tensors. The bitsandbytes
+contract is grounded by the observed Ideogram4 fixture at
+`tests/fixtures/ideogram4_input_proj_bitsandbytes_nf4.json` and the pinned
+upstream `kQuantizeBlockwise` source named in that fixture, where the first
+logical value is shifted into the high nibble and the second occupies the low
+nibble. The helper expects already reconstructed float32 absolute-maximum
+scales; safetensors parsing and nested/double-quantization reconstruction remain
+loader concerns.

@@ -100,9 +100,14 @@ layer = nf4.NF4Linear.from_packed(packed_weight, scales, bias=bias)
 ```
 
 `NF4Linear.from_bitsandbytes(byte_weight, scales, bias=bias)` is the compact
-form of the high-nibble-first boundary observed in bitsandbytes NF4 tensors. It
-expects float32 absolute-maximum scales that have already been reconstructed.
-It does not parse safetensors or resolve nested/double-quantized `quant_state`.
+form of the high-nibble-first bitsandbytes NF4 boundary. That packing contract
+is checked against a real Ideogram4 NF4 safetensors prefix in
+[`tests/fixtures/ideogram4_input_proj_bitsandbytes_nf4.json`](tests/fixtures/ideogram4_input_proj_bitsandbytes_nf4.json),
+with the model revision, source blob, tensor quant state, expected logical
+indices, and the pinned upstream bitsandbytes kernel source recorded beside the
+bytes. The constructor expects float32 absolute-maximum scales that have already
+been reconstructed. It does not parse safetensors or resolve nested/double-
+quantized `quant_state`.
 
 ## Native scope in 0.1
 
@@ -132,12 +137,17 @@ python tools/install_smoke.py \
   --report /absolute/path/to/mlx-nf4-install-smoke.json
 ```
 
-That check builds a fresh source distribution and then a wheel against the exact
-requested stock MLX version, installs it outside the checkout, exercises the
-native kernel against the reference path, runs the core tests, and records
-route, artifact, and numerical evidence in JSON. It fails loud on fallback
-imports, stale revisions, version substitution, missing binaries, blank output,
-or zero-test pseudo-success.
+That check builds a fresh source distribution and wheel in builder environment
+A, rejects absolute builder paths in the wheel's Mach-O payloads, then creates
+a separate build-tool-free runtime environment B containing only stock MLX and
+the non-editable wheel. Runtime B exercises 36 native/reference cases spanning
+float32, float16, bfloat16, every supported group size, aligned and tail output
+rows, and zero-scale groups before running the installed core tests. The JSON
+receipt records the effective Python, macOS, architecture, hardware model,
+Metal device, both environments, load commands, artifacts, and per-case errors.
+It fails loud on fallback imports, stale revisions, version substitution,
+missing binaries, builder/runtime aliasing, leaked rpaths, incomplete case
+matrices, blank output, or zero-test pseudo-success.
 
 ## Performance context
 

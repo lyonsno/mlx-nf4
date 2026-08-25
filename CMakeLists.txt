@@ -38,6 +38,12 @@ add_library(mlx_nf4_native)
 target_sources(mlx_nf4_native PUBLIC ${CMAKE_CURRENT_LIST_DIR}/csrc/mlx_nf4/nf4.cpp)
 target_include_directories(mlx_nf4_native PUBLIC ${CMAKE_CURRENT_LIST_DIR}/csrc)
 target_link_libraries(mlx_nf4_native PUBLIC mlx)
+set_target_properties(
+  mlx_nf4_native
+  PROPERTIES
+    BUILD_WITH_INSTALL_RPATH TRUE
+    INSTALL_RPATH "@loader_path;@loader_path/../mlx/lib"
+    INSTALL_RPATH_USE_LINK_PATH FALSE)
 
 if(MLX_BUILD_METAL)
   mlx_build_metallib(
@@ -70,6 +76,9 @@ nanobind_add_module(
   ${CMAKE_CURRENT_LIST_DIR}/csrc/mlx_nf4/bindings.cpp)
 target_link_libraries(_ext PRIVATE mlx_nf4_native)
 
-if(BUILD_SHARED_LIBS)
-  target_link_options(_ext PRIVATE -Wl,-rpath,@loader_path)
-endif()
+set_target_properties(
+  _ext
+  PROPERTIES
+    BUILD_WITH_INSTALL_RPATH TRUE
+    INSTALL_RPATH "@loader_path;@loader_path/../mlx/lib"
+    INSTALL_RPATH_USE_LINK_PATH FALSE)

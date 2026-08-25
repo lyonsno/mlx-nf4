@@ -18,9 +18,8 @@ from .core import (
 class NF4Linear(Module):
     """Package-owned NF4 linear layer.
 
-    The regular ``__call__`` path is reserved for the package-local Metal
-    quantized matmul primitive. Until that primitive exists, use
-    :meth:`reference_forward` explicitly for correctness checks.
+    The regular ``__call__`` path uses the package-local Metal quantized matmul
+    primitive. Use :meth:`reference_forward` explicitly for correctness checks.
     """
 
     def __init__(self, input_dims: int, output_dims: int, bias: bool = True, group_size: int = 64):

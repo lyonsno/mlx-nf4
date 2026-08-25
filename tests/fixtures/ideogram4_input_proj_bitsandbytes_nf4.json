@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "semantic_name": "Ideogram4 input projection bitsandbytes NF4 packed-prefix witness",
+  "provenance": {
+    "source_repository": "ideogram-ai/ideogram-4-nf4",
+    "source_revision": "f664347839e0a87bc495f5c9483cc0014b8e344e",
+    "source_file": "transformer/diffusion_pytorch_model.safetensors",
+    "source_lfs_blob": "797804d99ed15606c26cda49bc2816c4d6d1231ec29cdd931a360563da252972",
+    "tensor": "input_proj.weight",
+    "tensor_stored_shape": [294912, 1],
+    "tensor_stored_dtype": "U8",
+    "quant_state": {
+      "quant_type": "nf4",
+      "blocksize": 64,
+      "dtype": "bfloat16",
+      "shape": [4608, 128]
+    },
+    "packing_contract_source": "https://github.com/bitsandbytes-foundation/bitsandbytes/blob/95f9af309d4d5793847169c39288dcd3fcbdf564/csrc/kernels.cu#L2807-L2815",
+    "packing_contract": "For each logical pair, bitsandbytes places the first NF4 index in the high nibble and the second in the low nibble."
+  },
+  "packed_byte_prefix": [
+    151, 118, 86, 169, 123, 188, 151, 163,
+    156, 131, 26, 133, 106, 196, 119, 99,
+    10, 134, 137, 122, 124, 133, 219, 73,
+    172, 51, 102, 103, 107, 197, 139, 134
+  ],
+  "expected_logical_indices": [
+    9, 7, 7, 6, 5, 6, 10, 9, 7, 11, 11, 12, 9, 7, 10, 3,
+    9, 12, 8, 3, 1, 10, 8, 5, 6, 10, 12, 4, 7, 7, 6, 3,
+    0, 10, 8, 6, 8, 9, 7, 10, 7, 12, 8, 5, 13, 11, 4, 9,
+    10, 12, 3, 3, 6, 6, 6, 7, 6, 11, 12, 5, 8, 11, 8, 6
+  ],
+  "expected_mlx_uint32_words": [
+    2590336889, 981060535, 1486960841, 913788070,
+    2811783328, 2495436999, 1986409418, 1756912822
+  ]
+}

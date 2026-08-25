@@ -33,38 +33,43 @@ python tools/install_smoke.py \
 ```
 
 The command exports the exact clean Git revision into a fresh immutable source
-snapshot, creates and retains a fresh virtual environment, installs an exact
-stock MLX release, builds a new wheel without build isolation against that MLX
-version by first building a fresh source distribution and then building the
-wheel from that sdist, installs the wheel non-editably, executes the native
-kernel against the explicit dequantize-then-matmul reference, and runs the core
-test suite from outside the original source tree. Independent smokes never
-share `build/`, egg-info, or another mutable producer-local directory.
+snapshot and creates two retained virtual environments. Builder A installs the
+declared build contract and exact stock MLX release, builds a fresh source
+distribution, and builds the wheel from that sdist. The harness then audits the
+wheel's native payloads with `otool` and rejects non-system absolute load paths.
+Runtime B is created independently, installs stock MLX and the wheel without
+build dependencies, executes the native matrix against the explicit
+dequantize-then-matmul reference, and runs the core test suite from outside the
+original source tree. Independent smokes never share `build/`, egg-info, a
+virtual environment, or another mutable producer-local directory.
 
 The build also binds CMake's Python discovery to the active build interpreter.
 That prevents headers or CMake metadata from another Python installation from
 being combined with the requested environment's MLX dynamic library.
 
 The JSON report distinguishes requested and effective source revision, MLX
-version, Python executable, source-archive SHA-256, sdist SHA-256, imported module paths, wheel SHA-256, native
-artifact sizes, numerical error, and test count. It is written during every
-phase; an early failure records `failure_phase`, the command result, and the
-last trustworthy phase instead of disappearing before the primary artifact.
+version, Python base and runtime executables, builder/runtime roots, source-
+archive SHA-256, sdist SHA-256, imported module paths, wheel SHA-256, Mach-O
+load commands, native artifact sizes, per-case numerical errors, test count,
+hostname, macOS version/build, architecture, hardware model, and Metal device.
+It is written during every phase; an early failure records `failure_phase`, the
+command result, and the last trustworthy phase instead of disappearing before
+the primary artifact.
 
-The evidence validator deliberately rejects source or revision substitution,
-an unexpected MLX version, imports leaking from the source checkout, absent or
-blank native payloads, reused wheel state, zero-test output, and numerical
-error beyond the recorded tolerance.
+The evidence validator deliberately rejects source, revision, Python, or MLX
+substitution; imports leaking from the source checkout; builder/runtime
+aliasing; build-only packages in runtime; absent or blank native payloads;
+absolute builder rpaths; incomplete dtype/group/tail coverage; reused wheel
+state; zero-test output; and numerical error beyond each case's tolerance.
 
 ## Verified combinations
 
-The isolated local source route passed against stock MLX 0.32.2 on Python 3.12:
-the newly built non-editable wheel loaded all three native artifacts, the native
-kernel matched the reference with maximum absolute error `0.0`, and all 14 core
-tests passed. The exact candidate and second-machine receipts are recorded in
-the release evidence after the cross-box run; a version range in package
-metadata is a compatibility policy, not a substitute for route-specific
-receipts.
+The earlier single-environment route against stock MLX 0.32.2 is retained as
+development evidence only; fresh review showed that it could mask builder-path
+leakage and that its float32-aligned probe did not cover the advertised native
+surface. The exact corrected dual-environment M4 and M2 receipts are recorded
+only after those routes pass. A version range in package metadata is a
+compatibility policy, not a substitute for route-specific receipts.
 
 Stock MLX 0.31.2 is a measured unsupported boundary for 0.1. The exact source
 snapshot builds and installs, but the native call rejects MLX arrays at the

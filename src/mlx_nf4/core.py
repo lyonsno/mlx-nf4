@@ -156,10 +156,12 @@ def dequantize(
     _validate_group_size(group_size, op="dequantize")
     _validate_packed_weight(w, op="dequantize")
     _validate_scales(scales, op="dequantize")
-    if w.shape[-1] != scales.shape[-1] * (group_size // 8):
+    expected_scale_shape = (*w.shape[:-1], w.shape[-1] * 8 // group_size)
+    if scales.shape != expected_scale_shape:
         raise ValueError(
             "[dequantize] packed weight and scale shapes disagree for "
-            f"group_size={group_size}."
+            f"group_size={group_size}: expected {expected_scale_shape}, "
+            f"but got {scales.shape}."
         )
 
     s = stream
@@ -188,6 +190,11 @@ def quantized_matmul(
     group_size: int = 64,
     stream=None,
 ) -> mx.array:
+    if not transpose:
+        raise ValueError(
+            "[mlx_nf4.quantized_matmul] transpose=False is outside the 0.1 "
+            "native surface."
+        )
     try:
         from . import _ext
     except ImportError as exc:

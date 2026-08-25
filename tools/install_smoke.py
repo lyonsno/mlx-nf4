@@ -1,9 +1,10 @@
 """Build and clean-install evidence for mlx-nf4.
 
-The tool creates a fresh virtual environment, builds a wheel from an exact
-clean Git revision, installs that wheel against an exact MLX release, exercises
-the native kernel, and runs the package's installed-path tests. It writes a
-JSON report at every phase so an early failure cannot erase the last trustworthy
+The tool creates separate fresh builder and runtime environments, builds a wheel
+from an exact clean Git revision, audits its Mach-O load commands, installs it
+against an exact MLX release without build dependencies, exercises the claimed
+native matrix, and runs the package's installed-path tests. It writes a JSON
+report at every phase so an early failure cannot erase the last trustworthy
 evidence.
 """
 
@@ -21,6 +22,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import zipfile
 from datetime import datetime, timezone
 from typing import Any
 
@@ -30,7 +32,10 @@ _NATIVE_ARTIFACTS = ("_ext", "libmlx_nf4_native.dylib", "mlx_nf4.metallib")
 _PROBE = r"""
 import importlib.metadata
 import json
+import platform
 from pathlib import Path
+import subprocess
+import sys
 
 import mlx.core as mx
 import mlx_nf4 as nf4
@@ -43,16 +48,77 @@ artifacts = {
     "mlx_nf4.metallib": package_root / "mlx_nf4.metallib",
 }
 
-w = mx.reshape(mx.linspace(-1.0, 1.0, 2048), (32, 64))
-x = mx.reshape(mx.linspace(-0.75, 0.75, 192), (3, 64))
-wq, scales = nf4.quantize(w)
-actual = nf4.quantized_matmul(x, wq, scales)
-reference = nf4.reference_quantized_matmul(x, wq, scales)
-mx.eval(actual, reference)
-maximum_error = float(mx.max(mx.abs(actual - reference)).item())
+native_cases = []
+for dtype_name, dtype, tolerance in (
+    ("float32", mx.float32, 1e-5),
+    ("float16", mx.float16, 2e-2),
+    ("bfloat16", mx.bfloat16, 1.25e-1),
+):
+    for group_size in nf4.NF4_GROUP_SIZES:
+        for output_dims in (1, 31, 33, 65):
+            weight = mx.reshape(
+                mx.linspace(-1.0, 1.0, output_dims * group_size),
+                (output_dims, group_size),
+            )
+            weight = mx.concatenate(
+                [mx.zeros((1, group_size)), weight[1:]], axis=0
+            )
+            x = mx.reshape(
+                mx.linspace(-0.75, 0.75, 2 * group_size),
+                (2, group_size),
+            ).astype(dtype)
+            packed, scales = nf4.quantize(weight, group_size=group_size)
+            actual = nf4.quantized_matmul(
+                x, packed, scales, group_size=group_size
+            )
+            reference = nf4.reference_quantized_matmul(
+                x, packed, scales, group_size=group_size
+            )
+            mx.eval(actual, reference)
+            maximum_error = float(
+                mx.max(
+                    mx.abs(
+                        actual.astype(mx.float32) - reference.astype(mx.float32)
+                    )
+                ).item()
+            )
+            native_cases.append({
+                "dtype": dtype_name,
+                "group_size": group_size,
+                "output_dims": output_dims,
+                "max_abs_error": maximum_error,
+                "tolerance": tolerance,
+                "output_shape": list(actual.shape),
+            })
+
+def command_output(*argv):
+    return subprocess.check_output(argv, text=True).strip()
+
+build_only_packages = {}
+for package_name in ("build", "cmake", "nanobind", "setuptools", "wheel"):
+    try:
+        build_only_packages[package_name] = importlib.metadata.version(package_name)
+    except importlib.metadata.PackageNotFoundError:
+        pass
+
+device_info = mx.device_info()
+host_identity = {
+    "hostname": platform.node(),
+    "machine": platform.machine(),
+    "macos_version": platform.mac_ver()[0],
+    "macos_build": command_output("sw_vers", "-buildVersion"),
+    "hardware_model": command_output("sysctl", "-n", "hw.model"),
+    "metal_device": device_info.get("device_name"),
+    "metal_architecture": device_info.get("architecture"),
+}
 
 print(json.dumps({
     "mlx_version": importlib.metadata.version("mlx"),
+    "python": str(Path(getattr(sys, "_base_executable", sys.executable)).resolve()),
+    "python_executable": str(Path(sys.executable).resolve()),
+    "python_version": platform.python_version(),
+    "host_identity": host_identity,
+    "build_only_packages_present": build_only_packages,
     "mlx_core_path": str(Path(mx.__file__).resolve()),
     "mlx_nf4_path": str(Path(nf4.__file__).resolve()),
     "native_artifacts": {
@@ -64,10 +130,11 @@ print(json.dumps({
         for name, path in artifacts.items()
     },
     "primary_check": {
-        "checks_run": 2,
-        "max_abs_error": maximum_error,
-        "tolerance": 1e-5,
-        "output_shape": list(actual.shape),
+        "checks_run": len(native_cases),
+        "max_abs_error": max(case["max_abs_error"] for case in native_cases),
+        "tolerance": max(case["tolerance"] for case in native_cases),
+        "output_shape": native_cases[-1]["output_shape"],
+        "native_cases": native_cases,
     },
 }, sort_keys=True))
 """
@@ -110,6 +177,7 @@ def assess_evidence(evidence: dict[str, Any]) -> list[str]:
         ("source", "source"),
         ("revision", "revision"),
         ("mlx_version", "MLX version"),
+        ("python", "Python base executable"),
     ):
         requested_value = requested.get(field)
         effective_value = effective.get(field)
@@ -123,9 +191,24 @@ def assess_evidence(evidence: dict[str, Any]) -> list[str]:
                 f"requested {label} {requested_value!r}"
             )
 
-    environment_root = effective.get("environment_root")
+    builder_root = effective.get("builder_environment_root")
+    runtime_root = effective.get("runtime_environment_root")
+    if not isinstance(builder_root, str) or not builder_root:
+        errors.append("effective builder environment root is missing")
+    if not isinstance(runtime_root, str) or not runtime_root:
+        errors.append("effective runtime environment root is missing")
+    if (
+        isinstance(builder_root, str)
+        and builder_root
+        and isinstance(runtime_root, str)
+        and runtime_root
+        and Path(builder_root).resolve() == Path(runtime_root).resolve()
+    ):
+        errors.append("builder and runtime must use separate environments")
+
+    environment_root = runtime_root
     if not isinstance(environment_root, str) or not environment_root:
-        errors.append("effective environment root is missing")
+        errors.append("effective runtime environment root is missing")
     else:
         environment_path = Path(environment_root).resolve()
         for field in ("mlx_core_path", "mlx_nf4_path"):
@@ -140,6 +223,45 @@ def assess_evidence(evidence: dict[str, Any]) -> list[str]:
                     f"effective {field} is outside the fresh environment: "
                     f"{import_path}"
                 )
+
+        python_executable = effective.get("python_executable")
+        if not isinstance(python_executable, str) or not python_executable:
+            errors.append("effective Python executable is missing")
+        else:
+            try:
+                Path(python_executable).resolve().relative_to(environment_path)
+            except ValueError:
+                errors.append(
+                    "effective Python executable is outside the runtime "
+                    f"environment: {python_executable}"
+                )
+    if not isinstance(effective.get("python_version"), str) or not effective.get(
+        "python_version"
+    ):
+        errors.append("effective Python version is missing")
+
+    host_identity = _mapping(
+        effective.get("host_identity"), "effective host_identity", errors
+    )
+    for field in (
+        "hostname",
+        "machine",
+        "macos_version",
+        "macos_build",
+        "hardware_model",
+        "metal_device",
+    ):
+        if not isinstance(host_identity.get(field), str) or not host_identity.get(field):
+            errors.append(f"effective host_identity.{field} is missing")
+
+    build_only_packages = effective.get("build_only_packages_present")
+    if not isinstance(build_only_packages, dict):
+        errors.append("runtime build-only package inventory is missing")
+    elif build_only_packages:
+        errors.append(
+            "runtime environment contains build-only packages: "
+            + ", ".join(sorted(build_only_packages))
+        )
 
     artifacts = _mapping(
         evidence.get("native_artifacts"), "native_artifacts", errors
@@ -171,6 +293,23 @@ def assess_evidence(evidence: dict[str, Any]) -> list[str]:
         errors.append("wheel sha256 is missing or invalid")
     if wheel.get("fresh_work_directory") is not True:
         errors.append("wheel was not built in a fresh work directory")
+
+    macho_audit = _mapping(evidence.get("macho_audit"), "Mach-O audit", errors)
+    files_checked = macho_audit.get("files_checked")
+    if not isinstance(files_checked, int) or files_checked < 2:
+        errors.append("Mach-O audit did not inspect both native libraries")
+    forbidden_paths = macho_audit.get("forbidden_paths")
+    if not isinstance(forbidden_paths, list):
+        errors.append("Mach-O forbidden-path result is missing")
+    elif forbidden_paths:
+        errors.append(
+            "Mach-O payload contains forbidden absolute builder paths: "
+            + ", ".join(str(path) for path in forbidden_paths)
+        )
+    if not isinstance(macho_audit.get("load_commands"), dict) or not macho_audit.get(
+        "load_commands"
+    ):
+        errors.append("Mach-O load-command evidence is missing")
 
     snapshot = _mapping(evidence.get("source_snapshot"), "source_snapshot", errors)
     if snapshot.get("revision") != requested.get("revision"):
@@ -231,6 +370,52 @@ def assess_evidence(evidence: dict[str, Any]) -> list[str]:
     output_shape = primary.get("output_shape")
     if not isinstance(output_shape, list) or not output_shape:
         errors.append("primary check output_shape is missing or blank")
+
+    expected_cases = {
+        (dtype, group_size, output_dims)
+        for dtype in ("float32", "float16", "bfloat16")
+        for group_size in (32, 64, 128)
+        for output_dims in (1, 31, 33, 65)
+    }
+    native_cases = primary.get("native_cases")
+    observed_cases: set[tuple[str, int, int]] = set()
+    if not isinstance(native_cases, list):
+        errors.append("native case matrix is missing")
+    else:
+        for case in native_cases:
+            if not isinstance(case, dict):
+                errors.append("native case entry is invalid")
+                continue
+            identity = (
+                case.get("dtype"),
+                case.get("group_size"),
+                case.get("output_dims"),
+            )
+            if identity in observed_cases:
+                errors.append(f"native case is duplicated: {identity!r}")
+            observed_cases.add(identity)
+            case_error = case.get("max_abs_error")
+            case_tolerance = case.get("tolerance")
+            if (
+                not isinstance(case_error, (int, float))
+                or not math.isfinite(case_error)
+                or not isinstance(case_tolerance, (int, float))
+                or not math.isfinite(case_tolerance)
+                or case_error > case_tolerance
+            ):
+                errors.append(f"native case is outside tolerance: {identity!r}")
+        missing_cases = expected_cases - observed_cases
+        extra_cases = observed_cases - expected_cases
+        if missing_cases:
+            errors.append(
+                "native case matrix is incomplete; missing "
+                + ", ".join(repr(case) for case in sorted(missing_cases, key=repr))
+            )
+        if extra_cases:
+            errors.append(
+                "native case matrix contains unexpected cases: "
+                + ", ".join(repr(case) for case in sorted(extra_cases, key=repr))
+            )
 
     return errors
 
@@ -351,6 +536,79 @@ def environment_command(python: str, uv: str, environment_root: Path) -> list[st
     return [uv, "venv", "--seed", "--python", python, str(environment_root)]
 
 
+def _audit_wheel_macho(
+    wheel: Path,
+    *,
+    extraction_root: Path,
+    forbidden_roots: tuple[Path, ...],
+    report: dict[str, Any],
+    report_path: Path,
+) -> dict[str, Any]:
+    extraction_root.mkdir()
+    with zipfile.ZipFile(wheel) as archive:
+        archive.extractall(extraction_root)
+
+    load_commands: dict[str, dict[str, list[str]]] = {}
+    forbidden_paths: list[str] = []
+    native_files = sorted(
+        path
+        for path in extraction_root.rglob("*")
+        if path.is_file() and path.suffix in (".so", ".dylib")
+    )
+    for native_file in native_files:
+        relative = str(native_file.relative_to(extraction_root))
+        load_result = _run(
+            ["otool", "-l", str(native_file)],
+            phase="audit_macho_load_commands",
+            cwd=extraction_root,
+            report=report,
+            report_path=report_path,
+        )
+        linked_result = _run(
+            ["otool", "-L", str(native_file)],
+            phase="audit_macho_dependencies",
+            cwd=extraction_root,
+            report=report,
+            report_path=report_path,
+        )
+
+        rpaths: list[str] = []
+        expect_rpath = False
+        for line in load_result.stdout.splitlines():
+            stripped = line.strip()
+            if stripped == "cmd LC_RPATH":
+                expect_rpath = True
+                continue
+            if expect_rpath and stripped.startswith("path "):
+                rpaths.append(stripped[5:].split(" (offset", 1)[0])
+                expect_rpath = False
+        dependencies = [
+            line.strip().split(" (compatibility", 1)[0]
+            for line in linked_result.stdout.splitlines()[1:]
+            if line.strip()
+        ]
+        load_commands[relative] = {"rpaths": rpaths, "dependencies": dependencies}
+
+        for candidate in (*rpaths, *dependencies):
+            forbidden = False
+            if candidate.startswith("/") and not candidate.startswith(
+                ("/usr/lib/", "/System/Library/")
+            ):
+                forbidden = True
+            for root in forbidden_roots:
+                root_strings = {str(root), str(root.resolve())}
+                if any(root_string and root_string in candidate for root_string in root_strings):
+                    forbidden = True
+            if forbidden:
+                forbidden_paths.append(f"{relative}: {candidate}")
+
+    return {
+        "files_checked": len(native_files),
+        "forbidden_paths": sorted(set(forbidden_paths)),
+        "load_commands": load_commands,
+    }
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True, help="clean local Git checkout")
@@ -390,7 +648,7 @@ def main(argv: list[str] | None = None) -> int:
             "source": source.as_uri(),
             "revision": requested_revision,
             "mlx_version": arguments.mlx_version,
-            "python": arguments.python,
+            "python": str(Path(arguments.python).expanduser().resolve()),
             "environment_tool": arguments.uv,
         },
         "effective": {},
@@ -430,16 +688,24 @@ def main(argv: list[str] | None = None) -> int:
         _write_report(report_path, report)
 
         work_directory = _fresh_work_directory(arguments.work_dir)
-        environment_root = work_directory / ".venv"
+        builder_environment_root = work_directory / "builder-venv"
+        runtime_environment_root = work_directory / "runtime-venv"
         wheelhouse = work_directory / "wheelhouse"
         distribution_directory = work_directory / "dist"
         source_snapshot = work_directory / "source"
         source_archive = work_directory / "source.tar"
+        wheel_audit_root = work_directory / "wheel-audit"
         wheelhouse.mkdir()
         distribution_directory.mkdir()
         source_snapshot.mkdir()
         report["work_directory"] = str(work_directory)
-        report["effective"]["environment_root"] = str(environment_root)
+        report["effective"].update(
+            {
+                "environment_root": str(runtime_environment_root),
+                "builder_environment_root": str(builder_environment_root),
+                "runtime_environment_root": str(runtime_environment_root),
+            }
+        )
         _write_report(report_path, report)
 
         _run(
@@ -474,16 +740,18 @@ def main(argv: list[str] | None = None) -> int:
                 "uv is required to seed the evidence environment; pass --uv explicitly",
             )
         _run(
-            environment_command(arguments.python, arguments.uv, environment_root),
-            phase="create_environment",
+            environment_command(
+                arguments.python, arguments.uv, builder_environment_root
+            ),
+            phase="create_builder_environment",
             cwd=work_directory,
             report=report,
             report_path=report_path,
         )
-        environment_python = environment_root / "bin" / "python"
+        builder_python = builder_environment_root / "bin" / "python"
         _run(
             [
-                str(environment_python),
+                str(builder_python),
                 "-m",
                 "pip",
                 "install",
@@ -501,7 +769,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         _run(
             [
-                str(environment_python),
+                str(builder_python),
                 "-m",
                 "build",
                 "--sdist",
@@ -534,7 +802,7 @@ def main(argv: list[str] | None = None) -> int:
 
         _run(
             [
-                str(environment_python),
+                str(builder_python),
                 "-m",
                 "pip",
                 "wheel",
@@ -564,15 +832,49 @@ def main(argv: list[str] | None = None) -> int:
         }
         _write_report(report_path, report)
 
+        report["macho_audit"] = _audit_wheel_macho(
+            wheel,
+            extraction_root=wheel_audit_root,
+            forbidden_roots=(work_directory, builder_environment_root),
+            report=report,
+            report_path=report_path,
+        )
+        report["last_trustworthy_evidence"] = "audit_macho"
+        _write_report(report_path, report)
+
         _run(
-            [str(environment_python), "-m", "pip", "install", "--no-deps", str(wheel)],
+            environment_command(
+                arguments.python, arguments.uv, runtime_environment_root
+            ),
+            phase="create_runtime_environment",
+            cwd=work_directory,
+            report=report,
+            report_path=report_path,
+        )
+        runtime_python = runtime_environment_root / "bin" / "python"
+        _run(
+            [
+                str(runtime_python),
+                "-m",
+                "pip",
+                "install",
+                f"mlx=={arguments.mlx_version}",
+            ],
+            phase="install_runtime_contract",
+            cwd=work_directory,
+            report=report,
+            report_path=report_path,
+        )
+
+        _run(
+            [str(runtime_python), "-m", "pip", "install", "--no-deps", str(wheel)],
             phase="install_wheel",
             cwd=work_directory,
             report=report,
             report_path=report_path,
         )
         probe = _run(
-            [str(environment_python), "-c", _PROBE],
+            [str(runtime_python), "-c", _PROBE],
             phase="native_probe",
             cwd=work_directory,
             report=report,
@@ -587,6 +889,13 @@ def main(argv: list[str] | None = None) -> int:
                 "mlx_version": probe_evidence.get("mlx_version"),
                 "mlx_core_path": probe_evidence.get("mlx_core_path"),
                 "mlx_nf4_path": probe_evidence.get("mlx_nf4_path"),
+                "python": probe_evidence.get("python"),
+                "python_executable": probe_evidence.get("python_executable"),
+                "python_version": probe_evidence.get("python_version"),
+                "host_identity": probe_evidence.get("host_identity"),
+                "build_only_packages_present": probe_evidence.get(
+                    "build_only_packages_present"
+                ),
             }
         )
         report["native_artifacts"] = probe_evidence.get("native_artifacts", {})
@@ -595,7 +904,7 @@ def main(argv: list[str] | None = None) -> int:
 
         tests = _run(
             [
-                str(environment_python),
+                str(runtime_python),
                 "-m",
                 "unittest",
                 "discover",

@@ -62,6 +62,11 @@ void validate_shapes(
     const mx::array& scales,
     bool transpose,
     int group_size) {
+  if (!transpose) {
+    throw std::invalid_argument(
+        "[mlx_nf4.quantized_matmul] transpose=False is outside the 0.1 "
+        "native surface.");
+  }
   if (x.ndim() != 2 || w.ndim() != 2 || scales.ndim() != 2) {
     throw std::invalid_argument(
         "[mlx_nf4.quantized_matmul] initial native port supports 2D x, w, "
@@ -77,8 +82,8 @@ void validate_shapes(
         "scales.");
   }
   const int pack_factor = 8;
-  int K = transpose ? w.shape(-1) * pack_factor : w.shape(-2) * pack_factor;
-  int N = transpose ? w.shape(-2) : w.shape(-1);
+  int K = w.shape(-1) * pack_factor;
+  int N = w.shape(-2);
   int scale_groups = K / group_size;
   if (K % group_size != 0) {
     throw std::invalid_argument(
@@ -90,16 +95,10 @@ void validate_shapes(
         << K << " but got " << x.shape(-1) << ".";
     throw std::invalid_argument(msg.str());
   }
-  if (transpose) {
-    if (scales.shape(-2) != N || scales.shape(-1) != scale_groups) {
-      throw std::invalid_argument(
-          "[mlx_nf4.quantized_matmul] transpose=True scales shape must be "
-          "(N, K / group_size).");
-    }
-  } else if (scales.shape(-2) != scale_groups || scales.shape(-1) != N) {
+  if (scales.shape(-2) != N || scales.shape(-1) != scale_groups) {
     throw std::invalid_argument(
-        "[mlx_nf4.quantized_matmul] transpose=False scales shape must be "
-        "(K / group_size, N).");
+        "[mlx_nf4.quantized_matmul] transpose=True scales shape must be "
+        "(N, K / group_size).");
   }
 }
 
