@@ -8,7 +8,7 @@ Metal library, and an actual NF4 matmul must all be present and exercised.
 
 - macOS on Apple silicon with Metal support
 - Python 3.10 or newer
-- MLX 0.31.2 or newer
+- MLX 0.32.2 or newer
 - Xcode command-line tools when building from source
 
 The evidence command also uses `uv` to create and seed its disposable virtual
@@ -57,7 +57,16 @@ error beyond the recorded tolerance.
 
 ## Verified combinations
 
-The release candidate's exact local and second-machine receipts are recorded
-here only after the corresponding clean-room reports pass. A version range in
-package metadata is a compatibility policy; it is not a substitute for these
-route-specific receipts.
+The isolated local source route passed against stock MLX 0.32.2 on Python 3.12:
+the newly built non-editable wheel loaded all three native artifacts, the native
+kernel matched the reference with maximum absolute error `0.0`, and all 14 core
+tests passed. The exact candidate and second-machine receipts are recorded in
+the release evidence after the cross-box run; a version range in package
+metadata is a compatibility policy, not a substitute for route-specific
+receipts.
+
+Stock MLX 0.31.2 is a measured unsupported boundary for 0.1. The exact source
+snapshot builds and installs, but the native call rejects MLX arrays at the
+nanobind domain boundary. MLX 0.32.2 requires the newer nanobind contract, and
+the package deliberately does not maintain two version-dependent native build
+routes.

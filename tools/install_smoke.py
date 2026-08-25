@@ -293,7 +293,12 @@ def _extract_source_archive(archive_path: Path, destination: Path) -> None:
                     "export_source_snapshot",
                     f"source archive entry escapes its destination: {member.name!r}",
                 ) from error
-        archive.extractall(destination)
+        try:
+            archive.extractall(destination, filter="data")
+        except TypeError:
+            # Python 3.10 and 3.11 predate the extraction-filter argument. The
+            # member validation above supplies the traversal/type boundary.
+            archive.extractall(destination)
 
 
 def _git_output(source: Path, *arguments: str) -> str:

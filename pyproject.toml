@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77", "wheel", "cmake>=3.27", "nanobind==2.15.0", "mlx>=0.31.2"]
+requires = ["setuptools>=77", "wheel", "cmake>=3.27", "nanobind==2.15.0", "mlx>=0.32.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -19,7 +19,7 @@ classifiers = [
   "Programming Language :: Python :: 3 :: Only",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-dependencies = ["mlx>=0.31.2"]
+dependencies = ["mlx>=0.32.2"]
 
 [project.urls]
 Homepage = "https://github.com/lyonsno/mlx-nf4"

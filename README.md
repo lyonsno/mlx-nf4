@@ -13,7 +13,7 @@ checks.
 ## Install
 
 The package builds from source on Apple silicon and requires Xcode command-line
-tools, Python 3.10 or newer, and MLX 0.31.2 or newer:
+tools, Python 3.10 or newer, and MLX 0.32.2 or newer:
 
 ```sh
 git clone https://github.com/lyonsno/mlx-nf4.git
