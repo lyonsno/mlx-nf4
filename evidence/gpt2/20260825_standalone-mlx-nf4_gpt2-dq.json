@@ -1,10 +1,15 @@
 {
-  "semantic_name": "Final-package pinned GPT-2 double-quantized bitsandbytes NF4 smoke",
+  "semantic_name": "Pinned GPT-2 bitsandbytes NF4 standalone-package smoke",
   "model_id": "manu02/gpt2-bnb-4bit-nf4-dq",
   "model_revision": "7744ff22be99f562bdaa444612a35a20bf995999",
   "model_sha256": "7f509fca86781aa869b770d8c970d86d35aac709faecf665c5f0677b18485192",
   "mlx_nf4": {
     "version": "0.1.0",
+    "module_path": "/private/tmp/mlx-ideogram4-package-consumer-0825/.venv/lib/python3.12/site-packages/mlx_nf4/__init__.py",
+    "native_extension_path": "/private/tmp/mlx-ideogram4-package-consumer-0825/.venv/lib/python3.12/site-packages/mlx_nf4/_ext.cpython-312-darwin.so",
+    "metal_library_path": "/private/tmp/mlx-ideogram4-package-consumer-0825/.venv/lib/python3.12/site-packages/mlx_nf4/mlx_nf4.metallib",
+    "expected_package_url": "https://github.com/lyonsno/mlx-nf4.git",
+    "expected_package_commit": "6fa1281578327b6ee44c04886749e122c28ea00d",
     "direct_url": {
       "url": "https://github.com/lyonsno/mlx-nf4.git",
       "vcs_info": {
@@ -12,25 +17,66 @@
         "commit_id": "6fa1281578327b6ee44c04886749e122c28ea00d",
         "requested_revision": "6fa1281578327b6ee44c04886749e122c28ea00d"
       }
+    },
+    "mlx": {
+      "version": "0.32.2",
+      "module_path": "/private/tmp/mlx-ideogram4-package-consumer-0825/.venv/lib/python3.12/site-packages/mlx/core.cpython-312-darwin.so",
+      "direct_url": null
     }
-  },
-  "mlx": {
-    "version": "0.32.2",
-    "direct_url": null
-  },
-  "gpu_greenroom": {
-    "job_id": "23d0cd7cb007",
-    "requested_route": "mlx-nf4/6fa1281-gpt2-dq-7744ff22-stock-mlx-0.32.2",
-    "status": "done",
-    "exit_code": 0,
-    "warnings": []
   },
   "quantized_projection_count": 48,
   "representative_projection": "model.h.0.attn.c_attn",
   "representative_parity_max_abs_diff": 0.0,
   "prompt": "The capital of France is",
   "max_new_tokens": 40,
+  "token_ids": [
+    464,
+    3139,
+    286,
+    4881,
+    318,
+    262,
+    3139,
+    286,
+    262,
+    4141,
+    2066,
+    11,
+    290,
+    262,
+    4141,
+    2066,
+    318,
+    262,
+    3139,
+    286,
+    262,
+    4141,
+    2066,
+    13,
+    198,
+    198,
+    464,
+    4141,
+    2066,
+    318,
+    262,
+    3139,
+    286,
+    262,
+    4141,
+    2066,
+    13,
+    383,
+    4141,
+    2066,
+    318,
+    262,
+    3139,
+    286,
+    262
+  ],
   "generated_text": "The capital of France is the capital of the French Republic, and the French Republic is the capital of the French Republic.\n\nThe French Republic is the capital of the French Republic. The French Republic is the capital of the",
-  "load_seconds": 60.51594,
-  "generation_seconds": 1.043669
+  "load_seconds": 11.035181,
+  "generation_seconds": 0.212585
 }
