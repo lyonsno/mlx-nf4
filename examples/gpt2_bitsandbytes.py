@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+from importlib import import_module, metadata
 import json
 from pathlib import Path
 import time
@@ -18,6 +19,21 @@ from safetensors import safe_open
 MODEL_ID = "manu02/gpt2-bnb-4bit-nf4-dq"
 MODEL_REVISION = "7744ff22be99f562bdaa444612a35a20bf995999"
 QUANTIZED_PROJECTION_COUNT = 48
+
+
+def _package_identity() -> dict:
+    distribution = metadata.distribution("mlx-nf4")
+    direct_url_text = distribution.read_text("direct_url.json")
+    direct_url = json.loads(direct_url_text) if direct_url_text else None
+    extension = import_module("mlx_nf4._ext")
+    package_root = Path(nf4.__file__).resolve().parent
+    return {
+        "version": metadata.version("mlx-nf4"),
+        "module_path": str(Path(nf4.__file__).resolve()),
+        "native_extension_path": str(Path(extension.__file__).resolve()),
+        "metal_library_path": str(package_root / "mlx_nf4.metallib"),
+        "direct_url": direct_url,
+    }
 
 
 def _set_module(root, path: str, value) -> None:
@@ -200,7 +216,7 @@ def main() -> None:
         "model_id": MODEL_ID,
         "model_revision": local_revision,
         "model_sha256": hashlib.sha256(model_file.read_bytes()).hexdigest(),
-        "mlx_nf4_module": str(Path(nf4.__file__).resolve()),
+        "mlx_nf4": _package_identity(),
         "quantized_projection_count": len(quantized_modules),
         "representative_projection": representative_name,
         "representative_parity_max_abs_diff": parity_max_abs_diff,
