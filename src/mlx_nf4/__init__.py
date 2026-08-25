@@ -6,6 +6,7 @@ from .core import (
     pack_uint8_to_uint32,
     quantize,
     quantized_matmul,
+    reconstruct_bitsandbytes_scales,
     reference_quantized_matmul,
 )
 from .nn import NF4Linear
@@ -18,6 +19,7 @@ __all__ = [
     "pack_uint8_to_uint32",
     "quantize",
     "quantized_matmul",
+    "reconstruct_bitsandbytes_scales",
     "reference_quantized_matmul",
     "NF4Linear",
 ]

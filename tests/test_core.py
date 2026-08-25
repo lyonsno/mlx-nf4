@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import math
 import unittest
 
 import mlx.core as mx
@@ -129,6 +130,42 @@ class TestNF4Core(unittest.TestCase):
             fixture["expected_mlx_uint32_words"],
         )
 
+    def test_reconstruct_bitsandbytes_double_quantized_scales(self):
+        quantized_absmax = mx.array([0, 64, 128, 255, 32, 192], dtype=mx.uint8)
+        nested_quant_map = mx.linspace(-1.0, 1.0, 256).astype(mx.float32)
+        nested_absmax = mx.array([2.0, 4.0], dtype=mx.float32)
+
+        actual = nf4.reconstruct_bitsandbytes_scales(
+            quantized_absmax,
+            nested_absmax=nested_absmax,
+            nested_quant_map=nested_quant_map,
+            nested_offset=0.5,
+            nested_block_size=4,
+        )
+        expected = mx.array(
+            [
+                (-1.0 + 2.0 * code / 255.0) * scale + 0.5
+                for code, scale in zip(
+                    [0, 64, 128, 255, 32, 192],
+                    [2.0, 2.0, 2.0, 2.0, 4.0, 4.0],
+                )
+            ],
+            dtype=mx.float32,
+        )
+        mx.eval(actual, expected)
+
+        self.assertEqual(actual.dtype, mx.float32)
+        self.assertTrue(mx.allclose(actual, expected, atol=1e-6).item())
+
+    def test_reconstruct_bitsandbytes_plain_scales_normalizes_float32(self):
+        actual = nf4.reconstruct_bitsandbytes_scales(
+            mx.array([0.25, 0.5, 1.0], dtype=mx.float16)
+        )
+        mx.eval(actual)
+
+        self.assertEqual(actual.dtype, mx.float32)
+        self.assertEqual(actual.tolist(), [0.25, 0.5, 1.0])
+
     def test_reference_quantized_matmul_matches_dequantized_matmul(self):
         w = mx.random.normal((32, 64))
         x = mx.random.normal((3, 64))
@@ -165,6 +202,20 @@ class TestNF4Core(unittest.TestCase):
             mx.eval(y, y_ref)
 
             self.assertTrue(mx.allclose(y, y_ref, atol=1e-5).item())
+
+    def test_fast_quantized_matmul_preserves_activation_leading_dimensions(self):
+        weight = mx.reshape(mx.linspace(-1.0, 1.0, 32 * 64), (32, 64))
+        packed, scales = nf4.quantize(weight)
+
+        for shape in ((64,), (1, 3, 64), (2, 3, 4, 64)):
+            with self.subTest(shape=shape):
+                x = mx.reshape(mx.linspace(-0.5, 0.5, math.prod(shape)), shape)
+                actual = nf4.quantized_matmul(x, packed, scales)
+                reference = nf4.reference_quantized_matmul(x, packed, scales)
+                mx.eval(actual, reference)
+
+                self.assertEqual(actual.shape, (*shape[:-1], 32))
+                self.assertTrue(mx.allclose(actual, reference, atol=1e-5).item())
 
     def test_native_rejects_transpose_false(self):
         x = mx.ones((2, 64), dtype=mx.float32)
@@ -267,6 +318,19 @@ class TestNF4Core(unittest.TestCase):
         self.assertEqual(qlinear.input_dims, 64)
         self.assertEqual(qlinear.output_dims, 32)
         self.assertTrue(mx.allclose(y, y_ref, atol=1e-5).item())
+
+    def test_nf4_linear_preserves_activation_leading_dimensions(self):
+        weight = mx.reshape(mx.linspace(-1.0, 1.0, 32 * 64), (32, 64))
+        packed, scales = nf4.quantize(weight)
+        linear = nf4.NF4Linear.from_packed(packed, scales)
+        x = mx.reshape(mx.linspace(-0.5, 0.5, 2 * 3 * 64), (2, 3, 64))
+
+        actual = linear(x)
+        reference = linear.reference_forward(x)
+        mx.eval(actual, reference)
+
+        self.assertEqual(actual.shape, (2, 3, 32))
+        self.assertTrue(mx.allclose(actual, reference, atol=1e-5).item())
 
     def test_nf4_linear_from_packed_validation(self):
         w = mx.random.normal((32, 64))

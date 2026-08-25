@@ -30,6 +30,66 @@ NF4_LUT = mx.array(
 )
 
 
+def reconstruct_bitsandbytes_scales(
+    absmax: mx.array,
+    *,
+    nested_absmax: mx.array | None = None,
+    nested_quant_map: mx.array | None = None,
+    nested_offset: float = 0.0,
+    nested_block_size: int = 256,
+) -> mx.array:
+    """Reconstruct float32 absmax scales from bitsandbytes quant state.
+
+    Plain checkpoints already store floating-point absmax values. Double-
+    quantized checkpoints store uint8 indices into ``nested_quant_map`` plus
+    one ``nested_absmax`` multiplier per ``nested_block_size`` values and a
+    scalar offset.
+    """
+    nested_args = (nested_absmax, nested_quant_map)
+    if all(value is None for value in nested_args):
+        return absmax.astype(mx.float32)
+    if any(value is None for value in nested_args):
+        raise ValueError(
+            "[reconstruct_bitsandbytes_scales] nested_absmax and "
+            "nested_quant_map must be supplied together."
+        )
+    if absmax.dtype != mx.uint8:
+        raise ValueError(
+            "[reconstruct_bitsandbytes_scales] double-quantized absmax "
+            "values must have dtype uint8."
+        )
+    if nested_block_size <= 0:
+        raise ValueError(
+            "[reconstruct_bitsandbytes_scales] nested_block_size must be positive."
+        )
+
+    flat_absmax = mx.reshape(absmax, (-1,))
+    expected_nested_scales = (
+        flat_absmax.size + nested_block_size - 1
+    ) // nested_block_size
+    flat_nested_absmax = mx.reshape(nested_absmax, (-1,)).astype(mx.float32)
+    if flat_nested_absmax.size != expected_nested_scales:
+        raise ValueError(
+            "[reconstruct_bitsandbytes_scales] nested_absmax has "
+            f"{flat_nested_absmax.size} values, expected {expected_nested_scales} "
+            f"for {flat_absmax.size} quantized scales and "
+            f"nested_block_size={nested_block_size}."
+        )
+
+    flat_quant_map = mx.reshape(nested_quant_map, (-1,)).astype(mx.float32)
+    if flat_quant_map.size != 256:
+        raise ValueError(
+            "[reconstruct_bitsandbytes_scales] nested_quant_map must contain "
+            f"256 values, but got {flat_quant_map.size}."
+        )
+
+    decoded = mx.take(flat_quant_map, flat_absmax.astype(mx.uint32))
+    scale_indices = mx.arange(flat_absmax.size, dtype=mx.uint32) // nested_block_size
+    multipliers = mx.take(flat_nested_absmax, scale_indices)
+    reconstructed = decoded * multipliers + mx.array(nested_offset, dtype=mx.float32)
+    return mx.reshape(reconstructed, absmax.shape).astype(mx.float32)
+
+
 def _validate_group_size(group_size: int, *, op: str) -> None:
     if group_size not in NF4_GROUP_SIZES:
         raise ValueError(
@@ -204,14 +264,23 @@ def quantized_matmul(
             "reference_quantized_matmul explicitly for correctness tests."
         ) from exc
 
-    return _ext.quantized_matmul(
-        x,
+    if not x.shape:
+        raise ValueError(
+            "[mlx_nf4.quantized_matmul] activations must have at least one "
+            "dimension."
+        )
+
+    leading_shape = x.shape[:-1]
+    x_2d = mx.reshape(x, (-1, x.shape[-1]), stream=stream)
+    y_2d = _ext.quantized_matmul(
+        x_2d,
         w,
         scales,
         transpose=transpose,
         group_size=group_size,
         stream=stream,
     )
+    return mx.reshape(y_2d, (*leading_shape, y_2d.shape[-1]), stream=stream)
 
 
 def reference_quantized_matmul(

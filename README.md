@@ -32,6 +32,7 @@ version, hardware, and warm-up still matter.
 - group sizes 32, 64, and 128
 - float32, float16, and bfloat16 activations
 - explicit low-first and bitsandbytes-compatible high-first nibble intake
+- reconstruction of plain and nested/double-quantized bitsandbytes absmax scales
 - a separately named dequantize-then-matmul reference for correctness checks
 
 The package ships and loads its own C++ binding, dynamic library, and compiled
@@ -130,11 +131,36 @@ linear = nf4.NF4Linear.from_bitsandbytes(
 )
 ```
 
-This boundary accepts already reconstructed float32 absolute-maximum scales.
-Model-file parsing and nested/double-quantized scale reconstruction remain the
-loader's job. The nibble-order contract is checked against an observed
-Ideogram4 NF4 tensor prefix in
+`NF4Linear.from_bitsandbytes` accepts reconstructed float32 absolute-maximum
+scales. Use `reconstruct_bitsandbytes_scales` to obtain them from either plain
+absmax tensors or nested/double-quantized bitsandbytes quant state before
+constructing the layer. Model-file parsing remains the loader's job. The
+nibble-order contract is checked against an observed Ideogram4 NF4 tensor prefix in
 [`tests/fixtures/ideogram4_input_proj_bitsandbytes_nf4.json`](tests/fixtures/ideogram4_input_proj_bitsandbytes_nf4.json).
+
+## GPT-2 bitsandbytes consumer
+
+The repository includes a complete consumer for the public, double-quantized
+`manu02/gpt2-bnb-4bit-nf4-dq` checkpoint. It verifies the checkpoint revision,
+reconstructs nested scales, checks the stored NF4 codebook, replaces all 48
+GPT-2 projections with `NF4Linear`, compares one native projection against the
+explicit reference path, and writes a generation receipt.
+
+From a repository checkout:
+
+```sh
+python -m pip install -e ".[gpt2]"
+hf download manu02/gpt2-bnb-4bit-nf4-dq \
+  --revision 7744ff22be99f562bdaa444612a35a20bf995999 \
+  --local-dir ./gpt2-bnb-4bit-nf4-dq
+hf cache verify manu02/gpt2-bnb-4bit-nf4-dq \
+  --revision 7744ff22be99f562bdaa444612a35a20bf995999 \
+  --local-dir ./gpt2-bnb-4bit-nf4-dq \
+  --fail-on-missing-files
+python examples/gpt2_bitsandbytes.py \
+  --model-dir ./gpt2-bnb-4bit-nf4-dq \
+  --receipt ./gpt2-nf4-receipt.json
+```
 
 ## API
 
@@ -145,13 +171,16 @@ Ideogram4 NF4 tensor prefix in
 | `quantized_matmul` | Run the native Metal fast path |
 | `reference_quantized_matmul` | Dequantize explicitly and multiply for comparison |
 | `pack_uint8_to_uint32` | Convert byte-packed NF4 into the native word layout |
+| `reconstruct_bitsandbytes_scales` | Reconstruct float32 scales from plain or nested bitsandbytes absmax state |
 | `NF4Linear` | Frozen MLX layer backed by the native NF4 kernel |
 
 ## Native scope in 0.1
 
 The native kernel currently supports:
 
-- two-dimensional activations, packed weights, and scale tensors
+- activations with any number of leading dimensions; the package flattens
+  those dimensions for the native kernel and restores them on output
+- two-dimensional packed weights and scale tensors
 - transposed weights (`transpose=True`)
 - group sizes 32, 64, and 128
 - float32, float16, and bfloat16 activations

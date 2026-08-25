@@ -21,6 +21,9 @@ classifiers = [
 ]
 dependencies = ["mlx>=0.32.2"]
 
+[project.optional-dependencies]
+gpt2 = ["huggingface-hub", "mlx-lm", "numpy", "safetensors", "tokenizers"]
+
 [project.urls]
 Homepage = "https://github.com/lyonsno/mlx-nf4"
 Repository = "https://github.com/lyonsno/mlx-nf4"
