@@ -216,6 +216,46 @@ def assess_evidence(evidence: dict[str, Any]) -> list[str]:
     ):
         errors.append("builder and runtime must use separate environments")
 
+    commands = evidence.get("commands")
+    if not isinstance(commands, list):
+        errors.append("command evidence is missing")
+    elif isinstance(builder_root, str) and builder_root:
+        wheel_builds = [
+            command
+            for command in commands
+            if isinstance(command, dict) and command.get("phase") == "build_wheel"
+        ]
+        if len(wheel_builds) != 1:
+            errors.append("exactly one build_wheel command record is required")
+        else:
+            command_environment = wheel_builds[0].get("environment")
+            expected_scripts = _normalized_absolute_path(builder_root) / "bin"
+            if not isinstance(command_environment, dict):
+                errors.append("build_wheel command environment identity is missing")
+            else:
+                path_prefix = command_environment.get("path_prefix")
+                cmake_executable = command_environment.get("cmake_executable")
+                if (
+                    not isinstance(path_prefix, str)
+                    or _normalized_absolute_path(path_prefix) != expected_scripts
+                ):
+                    errors.append(
+                        "build_wheel PATH does not begin with the builder environment "
+                        "scripts directory"
+                    )
+                if not isinstance(cmake_executable, str) or not cmake_executable:
+                    errors.append("build_wheel CMake executable identity is missing")
+                else:
+                    try:
+                        _normalized_absolute_path(cmake_executable).relative_to(
+                            expected_scripts
+                        )
+                    except ValueError:
+                        errors.append(
+                            "build_wheel CMake executable is outside the builder "
+                            f"environment: {cmake_executable}"
+                        )
+
     environment_root = runtime_root
     if not isinstance(environment_root, str) or not environment_root:
         errors.append("effective runtime environment root is missing")
@@ -453,6 +493,16 @@ def _run(
 ) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
+    path_prefix: str | None = None
+    executable = Path(command[0]).expanduser()
+    if executable.is_absolute():
+        path_prefix = str(executable.parent)
+        inherited_path = environment.get("PATH", "")
+        environment["PATH"] = (
+            path_prefix
+            if not inherited_path
+            else path_prefix + os.pathsep + inherited_path
+        )
     started_at = _utc_now()
     result = subprocess.run(
         command,
@@ -471,6 +521,12 @@ def _run(
         "returncode": result.returncode,
         "stdout": result.stdout,
         "stderr": result.stderr,
+        "environment": {
+            "path_prefix": path_prefix,
+            "cmake_executable": shutil.which(
+                "cmake", path=environment.get("PATH")
+            ),
+        },
     }
     report["commands"].append(command_record)
     report["last_trustworthy_evidence"] = phase if result.returncode == 0 else report.get(

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import copy
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 
-from tools.install_smoke import assess_evidence, environment_command
+from tools.install_smoke import _run, assess_evidence, environment_command
 
 
 def complete_evidence() -> dict:
@@ -96,10 +97,64 @@ def complete_evidence() -> dict:
                 "mlx_nf4/libmlx_nf4_native.dylib": [],
             },
         },
+        "commands": [
+            {
+                "phase": "build_wheel",
+                "environment": {
+                    "path_prefix": "/tmp/smoke/builder-venv/bin",
+                    "cmake_executable": "/tmp/smoke/builder-venv/bin/cmake",
+                },
+            }
+        ],
     }
 
 
 class TestInstallSmokeEvidence(unittest.TestCase):
+    def test_run_exposes_interpreter_sibling_build_tools_on_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scripts = root / "builder-venv" / "bin"
+            scripts.mkdir(parents=True)
+            python = scripts / "python"
+            python.symlink_to(sys.executable)
+            cmake = scripts / "cmake"
+            cmake.write_text("#!/bin/sh\nexit 0\n")
+            cmake.chmod(0o755)
+            probe = root / "probe.py"
+            probe.write_text(
+                "import shutil, sys\n"
+                "actual = shutil.which('cmake')\n"
+                "print(actual or '')\n"
+                "raise SystemExit(0 if actual == sys.argv[1] else 1)\n"
+            )
+            report = {"commands": []}
+
+            result = _run(
+                [str(python), str(probe), str(cmake)],
+                phase="build_wheel",
+                cwd=root,
+                report=report,
+                report_path=root / "report.json",
+            )
+
+            self.assertEqual(result.stdout.strip(), str(cmake))
+
+    def test_rejects_host_global_cmake_for_wheel_build(self):
+        evidence = complete_evidence()
+        evidence["commands"] = [
+            {
+                "phase": "build_wheel",
+                "environment": {
+                    "path_prefix": "/opt/homebrew/bin",
+                    "cmake_executable": "/opt/homebrew/bin/cmake",
+                },
+            }
+        ]
+
+        errors = assess_evidence(evidence)
+
+        self.assertTrue(any("builder environment" in error for error in errors), errors)
+
     def test_environment_creation_seeds_pip_without_python_ensurepip(self):
         self.assertEqual(
             environment_command(
