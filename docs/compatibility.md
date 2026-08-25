@@ -38,6 +38,10 @@ version, installs the wheel non-editably, executes the native kernel against
 the explicit dequantize-then-matmul reference, and runs the core test suite from
 outside the source tree.
 
+The build also binds CMake's Python discovery to the active build interpreter.
+That prevents headers or CMake metadata from another Python installation from
+being combined with the requested environment's MLX dynamic library.
+
 The JSON report distinguishes requested and effective source revision, MLX
 version, Python executable, imported module paths, wheel SHA-256, native
 artifact sizes, numerical error, and test count. It is written during every

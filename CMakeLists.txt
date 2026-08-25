@@ -8,6 +8,15 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(BUILD_SHARED_LIBS "Build extensions as a shared library" ON)
 
+if(DEFINED ENV{MLX_NF4_PYTHON_EXECUTABLE})
+  set(
+    Python_EXECUTABLE
+    "$ENV{MLX_NF4_PYTHON_EXECUTABLE}"
+    CACHE FILEPATH
+    "Python interpreter from the active mlx-nf4 build environment"
+    FORCE)
+endif()
+
 find_package(
   Python 3.10
   COMPONENTS Interpreter Development.Module
