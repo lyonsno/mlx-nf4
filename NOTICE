@@ -1,5 +1,5 @@
 mlx-nf4
-=======
+-------
 
 The package-local C++ and Metal implementation is derived from the
 MIT-licensed MLX extension and quantized-kernel interfaces. Apple copyright
