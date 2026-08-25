@@ -11,6 +11,10 @@ Metal library, and an actual NF4 matmul must all be present and exercised.
 - MLX 0.31.2 or newer
 - Xcode command-line tools when building from source
 
+The evidence command also uses `uv` to create and seed its disposable virtual
+environment. This is a smoke-tool dependency, not an `mlx-nf4` runtime or build
+dependency; ordinary package installation remains a standard Python build.
+
 The native operation currently accepts two-dimensional activations and packed
 weights, `transpose=True`, group sizes 32, 64, and 128, and float32, float16,
 or bfloat16 activations. Batched quantized matmul and gather quantized matmul

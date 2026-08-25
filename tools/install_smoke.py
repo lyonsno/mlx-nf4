@@ -16,6 +16,7 @@ import math
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -287,6 +288,12 @@ def _fresh_work_directory(requested: Path | None) -> Path:
     return path
 
 
+def environment_command(python: str, uv: str, environment_root: Path) -> list[str]:
+    """Return the isolated-environment creation command."""
+
+    return [uv, "venv", "--seed", "--python", python, str(environment_root)]
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True, help="clean local Git checkout")
@@ -297,6 +304,11 @@ def _parser() -> argparse.ArgumentParser:
         "--python",
         default=sys.executable,
         help="Python interpreter used to create the clean environment",
+    )
+    parser.add_argument(
+        "--uv",
+        default=shutil.which("uv"),
+        help="uv executable used only to create and seed the evidence environment",
     )
     parser.add_argument(
         "--work-dir",
@@ -322,6 +334,7 @@ def main(argv: list[str] | None = None) -> int:
             "revision": requested_revision,
             "mlx_version": arguments.mlx_version,
             "python": arguments.python,
+            "environment_tool": arguments.uv,
         },
         "effective": {},
         "native_artifacts": {},
@@ -365,8 +378,13 @@ def main(argv: list[str] | None = None) -> int:
         report["effective"]["environment_root"] = str(environment_root)
         _write_report(report_path, report)
 
+        if not arguments.uv:
+            raise SmokeFailure(
+                "create_environment",
+                "uv is required to seed the evidence environment; pass --uv explicitly",
+            )
         _run(
-            [arguments.python, "-m", "venv", str(environment_root)],
+            environment_command(arguments.python, arguments.uv, environment_root),
             phase="create_environment",
             cwd=work_directory,
             report=report,

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 import unittest
 
-from tools.install_smoke import assess_evidence
+from tools.install_smoke import assess_evidence, environment_command
 
 
 def complete_evidence() -> dict:
@@ -46,6 +47,23 @@ def complete_evidence() -> dict:
 
 
 class TestInstallSmokeEvidence(unittest.TestCase):
+    def test_environment_creation_seeds_pip_without_python_ensurepip(self):
+        self.assertEqual(
+            environment_command(
+                "/opt/python/bin/python3",
+                "/opt/homebrew/bin/uv",
+                Path("/tmp/smoke/.venv"),
+            ),
+            [
+                "/opt/homebrew/bin/uv",
+                "venv",
+                "--seed",
+                "--python",
+                "/opt/python/bin/python3",
+                "/tmp/smoke/.venv",
+            ],
+        )
+
     def test_complete_evidence_is_accepted(self):
         self.assertEqual(assess_evidence(complete_evidence()), [])
 
