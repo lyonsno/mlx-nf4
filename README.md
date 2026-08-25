@@ -146,6 +146,12 @@ reconstructs nested scales, checks the stored NF4 codebook, replaces all 48
 GPT-2 projections with `NF4Linear`, compares one native projection against the
 explicit reference path, and writes a generation receipt.
 
+The final-package smoke is preserved at
+[`evidence/gpt2/20260825_standalone-mlx-nf4_gpt2-dq.json`](evidence/gpt2/20260825_standalone-mlx-nf4_gpt2-dq.json).
+It binds the exact checkpoint revision and SHA-256, VCS-installed package commit
+`6fa1281`, stock MLX 0.32.2, all 48 projections, native/reference max absolute
+difference `0.0`, and the generated continuation.
+
 From a repository checkout:
 
 ```sh
